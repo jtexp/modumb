@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Git remote helper for modem:// URLs.
+
+This script is called by git when accessing modem:// URLs.
+It must be named 'git-remote-modem' and be in PATH.
+"""
+
+import sys
+import os
+
+# Add src to path for development
+script_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.join(os.path.dirname(script_dir), 'src')
+if os.path.isdir(src_dir):
+    sys.path.insert(0, src_dir)
+
+from modumb.git.remote_helper import main
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modumb"
+version = "0.1.0"
+description = "Acoustic Modem Git Transport System"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "modumb contributors"}
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "sounddevice>=0.4.6",
+    "crcmod>=1.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+git-remote-modem = "modumb.git.remote_helper:main"
+modem-git-server = "modumb.http.server:main"
+modem-audio = "modumb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+modumb = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
