@@ -32,28 +32,27 @@
 ## 🎬 How It Works
 
 ```mermaid
-flowchart LR
-    subgraph Client["🖥️ Client Machine"]
+flowchart TB
+    subgraph Client["🖥️ Client"]
         GC[git clone] --> RH[Remote Helper]
-        RH --> HC[HTTP Client]
-        HC --> RT1[Reliable Transport]
-        RT1 --> F1[Framer]
+        RH --> HC[HTTP]
+        HC --> RT1[ARQ Transport]
+        RT1 --> F1[Framer + CRC]
         F1 --> M1[AFSK Modem]
-        M1 --> S1["🔊 Speaker"]
     end
 
-    S1 -.->|"♪ Sound Waves ♪"| M2
+    M1 -->|"🔊 1200/2200 Hz"| AIR["♪ Sound Waves ♪"]
+    AIR -->|"🎤 Audio"| M2
 
-    subgraph Server["🖥️ Server Machine"]
-        M2["🎤 Microphone"] --> M3[AFSK Modem]
-        M3 --> F2[Framer]
-        F2 --> RT2[Reliable Transport]
-        RT2 --> HS[HTTP Server]
+    subgraph Server["🖥️ Server"]
+        M2[AFSK Modem] --> F2[Framer + CRC]
+        F2 --> RT2[ARQ Transport]
+        RT2 --> HS[HTTP]
         HS --> GS[git-upload-pack]
     end
 ```
 
-The modem converts Git data into audio tones at **1200 Hz** (mark/1) and **2200 Hz** (space/0), transmits through speakers, receives via microphone, and reconstructs the data on the other side.
+The modem encodes data as audio tones (**1200 Hz** = 1, **2200 Hz** = 0) at 300 baud, transmits through speakers, and decodes via microphone.
 
 ---
 
