@@ -39,9 +39,10 @@ except ImportError:
 
 
 # Frame constants
-PREAMBLE = b'\xAA' * 8
+# Longer preamble for better bit synchronization over audio
+PREAMBLE = b'\xAA' * 16  # 16 bytes of alternating bits
 SYNC = b'\x7E\x7E'
-MAX_PAYLOAD_SIZE = 256
+MAX_PAYLOAD_SIZE = 64  # Reduced to limit clock drift impact
 ESCAPE_BYTE = 0x7D
 FLAG_BYTE = 0x7E
 
@@ -126,6 +127,43 @@ class Frame:
         return PREAMBLE + SYNC + stuffed
 
     @classmethod
+    def _find_frame_start(cls, data: bytes) -> int:
+        """Find the start of frame content after SYNC.
+
+        Tolerates bit errors in SYNC pattern by looking for
+        preamble-like bytes followed by frame type.
+        """
+        # Try exact SYNC match first
+        sync_pos = data.find(SYNC)
+        if sync_pos >= 0:
+            return sync_pos + len(SYNC)
+
+        # Tolerant search: look for preamble-like pattern followed by valid frame type
+        # Valid frame types: 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13
+        valid_types = {0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13}
+
+        for i in range(4, len(data) - 7):
+            # Check if bytes before look like preamble (0xAA with possible bit errors)
+            preamble_score = 0
+            for j in range(max(0, i - 6), i):
+                byte = data[j]
+                # 0xAA has 4 ones and 4 zeros, alternating
+                # Similar bytes: 0xAA, 0xA8, 0xAB, 0x2A, 0xAE, 0xEA, 0x55
+                ones = bin(byte).count('1')
+                if ones >= 3 and ones <= 5:
+                    preamble_score += 1
+
+            if preamble_score >= 3:
+                # Skip 2 bytes (corrupted SYNC) and check for valid frame type
+                content_start = i + 2
+                if content_start < len(data):
+                    frame_type = data[content_start]
+                    if frame_type in valid_types:
+                        return content_start
+
+        return -1
+
+    @classmethod
     def decode(cls, data: bytes) -> Optional["Frame"]:
         """Decode frame from received bytes.
 
@@ -135,13 +173,12 @@ class Frame:
         Returns:
             Decoded Frame, or None if invalid
         """
-        # Find sync pattern
-        sync_pos = data.find(SYNC)
-        if sync_pos < 0:
+        # Find frame start (after SYNC)
+        content_start = cls._find_frame_start(data)
+        if content_start < 0:
             return None
 
-        # Skip to after sync
-        data = data[sync_pos + len(SYNC):]
+        data = data[content_start:]
 
         if len(data) < 7:  # Minimum: TYPE(1) + SEQ(2) + LEN(2) + CRC(2)
             return None
@@ -178,6 +215,10 @@ class Frame:
         computed_crc = cls.compute_crc(content)
 
         if received_crc != computed_crc:
+            import sys
+            print(f'DEBUG FRAME: CRC mismatch: received=0x{received_crc:04x} computed=0x{computed_crc:04x} length={length}', file=sys.stderr, flush=True)
+            # Show first 50 bytes of payload for debugging
+            print(f'DEBUG FRAME: Payload start: {payload[:50].hex() if len(payload) > 50 else payload.hex()}', file=sys.stderr, flush=True)
             return None
 
         # Validate frame type

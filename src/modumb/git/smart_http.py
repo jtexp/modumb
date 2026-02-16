@@ -60,10 +60,13 @@ class GitSmartHttpClient:
         Returns:
             Dict mapping ref names to SHA1 hashes
         """
+        import sys
         path = self._make_path('info/refs')
         params = '?service=git-upload-pack'
 
+        print(f'DEBUG: Requesting {path + params}', file=sys.stderr, flush=True)
         response = self.http.get(path + params)
+        print(f'DEBUG: Got response: {response}', file=sys.stderr, flush=True)
         if response is None or response.status_code != 200:
             raise RuntimeError(f'Failed to discover refs: {response}')
 
@@ -88,7 +91,8 @@ class GitSmartHttpClient:
             return b''
 
         # Build capabilities we support
-        caps = ['multi_ack', 'side-band-64k', 'ofs-delta', 'thin-pack']
+        # Note: NOT using side-band-64k to simplify response parsing
+        caps = ['ofs-delta', 'thin-pack']
         caps = [c for c in caps if c in self.capabilities]
 
         # Build request

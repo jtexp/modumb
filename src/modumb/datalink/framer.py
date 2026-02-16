@@ -60,8 +60,10 @@ class Framer:
         Args:
             frame: Frame to send
         """
+        import sys
         # Encode frame to bytes
         data = frame.encode()
+        print(f'DEBUG FRAMER: Sending frame type={frame.frame_type.name} seq={frame.sequence} ({len(data)} bytes)', file=sys.stderr, flush=True)
 
         # Small delay for half-duplex timing
         if self.tx_delay > 0:
@@ -69,6 +71,7 @@ class Framer:
 
         # Send via modem
         self.modem.send(data, blocking=True)
+        print(f'DEBUG FRAMER: Frame sent', file=sys.stderr, flush=True)
 
     def receive_frame(self, timeout: float = None) -> Optional[Frame]:
         """Receive a frame from the modem.
@@ -79,6 +82,7 @@ class Framer:
         Returns:
             Received Frame, or None on timeout/error
         """
+        import sys
         if timeout is None:
             timeout = self.frame_timeout
 
@@ -91,11 +95,16 @@ class Framer:
         # Receive raw data from modem
         data = self.modem.receive(timeout=timeout)
 
-        if not data:
+        if not data or len(data) == 0:
+            print(f'DEBUG FRAMER: No data received', file=sys.stderr, flush=True)
             return None
 
         # Try to decode frame
         frame = Frame.decode(data)
+        if frame:
+            print(f'DEBUG FRAMER: Received frame type={frame.frame_type.name} seq={frame.sequence}', file=sys.stderr, flush=True)
+        else:
+            print(f'DEBUG FRAMER: Failed to decode {len(data)} bytes: {data[:50].hex()}...', file=sys.stderr, flush=True)
         return frame
 
     def receive_frame_raw(self, timeout: float = None) -> tuple[Optional[Frame], bytes]:
@@ -167,6 +176,23 @@ class Framer:
 
         deadline = time.time() + timeout
 
+        # First check if we have a matching frame already queued
+        queued = []
+        while not self._rx_queue.empty():
+            try:
+                frame = self._rx_queue.get_nowait()
+                if self._frame_matches(frame, expected_type, expected_seq):
+                    # Put non-matching frames back
+                    for f in queued:
+                        self._rx_queue.put(f)
+                    return frame
+                queued.append(frame)
+            except queue.Empty:
+                break
+        # Put non-matching frames back
+        for f in queued:
+            self._rx_queue.put(f)
+
         while time.time() < deadline:
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -178,14 +204,26 @@ class Framer:
                 continue
 
             # Check if frame matches criteria
-            if expected_type is not None and frame.frame_type != expected_type:
-                continue
-            if expected_seq is not None and frame.sequence != expected_seq:
-                continue
+            if self._frame_matches(frame, expected_type, expected_seq):
+                return frame
 
-            return frame
+            # Queue non-matching frames for later
+            self._rx_queue.put(frame)
 
         return None
+
+    def _frame_matches(
+        self,
+        frame: Frame,
+        expected_type: Optional[FrameType],
+        expected_seq: Optional[int],
+    ) -> bool:
+        """Check if frame matches criteria."""
+        if expected_type is not None and frame.frame_type != expected_type:
+            return False
+        if expected_seq is not None and frame.sequence != expected_seq:
+            return False
+        return True
 
     def exchange(self, frame: Frame, timeout: float = None) -> Optional[Frame]:
         """Send a frame and wait for response.

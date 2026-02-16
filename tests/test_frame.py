@@ -107,9 +107,11 @@ class TestFrame:
         frame = Frame.create_data(1, b'Hello')
         encoded = bytearray(frame.encode())
 
-        # Corrupt a byte in the payload area
-        if len(encoded) > 15:
-            encoded[15] ^= 0xFF
+        # Corrupt a byte in the payload area (after preamble + sync + header)
+        # Preamble=16, Sync=2, Header=5, so payload starts at 23
+        payload_start = 23
+        if len(encoded) > payload_start:
+            encoded[payload_start] ^= 0xFF
 
         decoded = Frame.decode(bytes(encoded))
 

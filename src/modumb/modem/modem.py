@@ -14,7 +14,7 @@ from .audio_io import AudioInterface, LoopbackAudioInterface
 
 
 # Timing constants
-TURNAROUND_DELAY = 0.1  # 100ms delay for half-duplex turnaround
+TURNAROUND_DELAY = 0.05  # 50ms delay for half-duplex turnaround
 
 
 class Modem:
@@ -94,9 +94,11 @@ class Modem:
             # Modulate data to audio samples
             samples = self.modulator.modulate(data)
 
-            # Add small leading/trailing silence
-            silence = np.zeros(int(0.05 * self.sample_rate), dtype=np.float32)
-            samples = np.concatenate([silence, samples, silence])
+            # Add leading/trailing silence for audio system stabilization
+            # Longer leading silence helps with filter settling and sync
+            lead_silence = np.zeros(int(0.15 * self.sample_rate), dtype=np.float32)
+            trail_silence = np.zeros(int(0.05 * self.sample_rate), dtype=np.float32)
+            samples = np.concatenate([lead_silence, samples, trail_silence])
 
             # Transmit
             self.audio.transmit(samples, blocking=blocking)
@@ -116,7 +118,14 @@ class Modem:
         """
         with self._lock:
             # Receive audio samples
-            samples = self.audio.receive_until_silence(timeout=timeout)
+            # Use larger min_samples to ensure we capture the full transmission
+            # At 300 baud, 8 bytes preamble = 64 bits = 10240 samples
+            # Add margin for startup delay and filter settling
+            samples = self.audio.receive_until_silence(
+                timeout=timeout,
+                min_samples=10000,  # ~200ms of audio minimum
+                silence_duration=0.3,  # Shorter to respond faster
+            )
 
             if len(samples) == 0:
                 return b''

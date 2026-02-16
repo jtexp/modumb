@@ -70,29 +70,35 @@ class Session:
         Returns:
             True if connection established
         """
+        import sys
         with self._lock:
             if self.state != SessionState.CLOSED:
                 return False
 
             for attempt in range(self.config.handshake_retries):
                 # Send SYN
+                print(f'DEBUG SESSION connect: Sending SYN (attempt {attempt+1})', file=sys.stderr, flush=True)
                 syn = Frame.create_syn()
                 self.framer.send_frame(syn)
                 self.state = SessionState.SYN_SENT
 
                 # Wait for SYN-ACK
+                print(f'DEBUG SESSION connect: Waiting for SYN-ACK', file=sys.stderr, flush=True)
                 response = self.framer.wait_for_frame(
                     expected_type=FrameType.SYN_ACK,
                     timeout=self.config.connect_timeout,
                 )
 
                 if response is None:
+                    print(f'DEBUG SESSION connect: No SYN-ACK received', file=sys.stderr, flush=True)
                     continue
 
                 # Send ACK to complete handshake
+                print(f'DEBUG SESSION connect: Got SYN-ACK, sending ACK', file=sys.stderr, flush=True)
                 ack = Frame.create_ack(0)
                 self.framer.send_frame(ack)
                 self.state = SessionState.ESTABLISHED
+                print(f'DEBUG SESSION connect: ESTABLISHED', file=sys.stderr, flush=True)
 
                 # Reset transport sequence numbers
                 self.transport.reset()
@@ -113,6 +119,7 @@ class Session:
         Returns:
             True if connection established
         """
+        import sys
         if timeout is None:
             timeout = self.config.connect_timeout * 2
 
@@ -121,13 +128,16 @@ class Session:
                 return False
 
             # Wait for SYN
+            print(f'DEBUG SESSION accept: Waiting for SYN (timeout={timeout})', file=sys.stderr, flush=True)
             frame = self.framer.wait_for_frame(
                 expected_type=FrameType.SYN,
                 timeout=timeout,
             )
 
             if frame is None:
+                print(f'DEBUG SESSION accept: No SYN received', file=sys.stderr, flush=True)
                 return False
+            print(f'DEBUG SESSION accept: Got SYN!', file=sys.stderr, flush=True)
 
             self.state = SessionState.SYN_RECEIVED
 

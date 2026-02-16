@@ -123,6 +123,11 @@ class AudioInterface:
         self._running = False
         self._lock = threading.Lock()
 
+        # Echo suppression state
+        self._transmitting = False
+        self._last_tx_end: float = 0.0
+        self._echo_guard_time: float = 0.08  # Time to wait after TX for echo to die
+
     def start(self) -> None:
         """Start audio streams."""
         if self.loopback:
@@ -139,7 +144,8 @@ class AudioInterface:
             if self._running:
                 return
 
-            # Full audio mode - need both input and output streams
+            # Create input stream for receiving
+            # (transmit uses sd.play directly for better compatibility)
             self._input_stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
@@ -149,17 +155,7 @@ class AudioInterface:
                 callback=self._input_callback,
             )
 
-            self._output_stream = sd.OutputStream(
-                samplerate=self.sample_rate,
-                channels=self.channels,
-                blocksize=self.blocksize,
-                device=self.output_device,
-                dtype=np.float32,
-                callback=self._output_callback,
-            )
-
             self._input_stream.start()
-            self._output_stream.start()
             self._running = True
 
     def stop(self) -> None:
@@ -172,10 +168,8 @@ class AudioInterface:
                 self._input_stream.close()
                 self._input_stream = None
 
-            if self._output_stream:
-                self._output_stream.stop()
-                self._output_stream.close()
-                self._output_stream = None
+            # Note: output uses sd.play() directly, no persistent stream
+            self._output_stream = None
 
     def _input_callback(
         self,
@@ -188,8 +182,22 @@ class AudioInterface:
         if status:
             pass  # Could log status flags
 
+        # Echo suppression: ignore audio during transmission and guard period
+        if self._transmitting:
+            return
+        if time.time() < self._last_tx_end + self._echo_guard_time:
+            return
+
         # Copy data to queue
         self._rx_queue.put(indata.copy().flatten())
+
+    def clear_receive_buffer(self) -> None:
+        """Clear the receive buffer (discard any pending audio)."""
+        while True:
+            try:
+                self._rx_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def _output_callback(
         self,
@@ -236,13 +244,20 @@ class AudioInterface:
                     sd.wait()
             return
 
-        # Queue samples for transmission
-        self._tx_queue.put(samples_f32)
+        # Echo suppression: mark as transmitting, clear buffer
+        self._transmitting = True
+        self.clear_receive_buffer()
 
+        # Use direct playback for reliable transmission
+        # (callback-based output doesn't work well with some audio backends)
+        sd.play(samples_f32, self.sample_rate, device=self.output_device)
         if blocking:
-            # Wait for queue to drain
-            duration = len(samples) / self.sample_rate
-            time.sleep(duration + 0.1)  # Add small buffer
+            sd.wait()
+
+        # Echo suppression: record end time, clear any echo that snuck through
+        self._transmitting = False
+        self._last_tx_end = time.time()
+        self.clear_receive_buffer()
 
     def receive(self, num_samples: int, timeout: float = 5.0) -> np.ndarray:
         """Receive audio samples.
@@ -308,6 +323,7 @@ class AudioInterface:
         collected = 0
         silence_samples = int(silence_duration * self.sample_rate)
         deadline = time.time() + timeout
+        signal_detected = False
 
         while time.time() < deadline:
             block = self.receive(self.blocksize, timeout=0.1)
@@ -317,12 +333,23 @@ class AudioInterface:
             samples.append(block)
             collected += len(block)
 
-            # Check for silence after minimum samples
-            if collected >= min_samples:
-                recent = np.concatenate(samples[-10:]) if len(samples) >= 10 else np.concatenate(samples)
-                rms = np.sqrt(np.mean(recent[-silence_samples:] ** 2))
-                if rms < threshold:
-                    break
+            # Check for signal presence (RMS above threshold)
+            block_rms = np.sqrt(np.mean(block ** 2))
+            if block_rms > threshold * 2:  # Signal is present
+                signal_detected = True
+
+            # Only check for silence AFTER we've detected signal
+            if signal_detected and collected >= min_samples:
+                # Need enough samples to check for silence_duration
+                # Each block is blocksize (1024) samples, so we need at least
+                # silence_samples / blocksize blocks
+                blocks_needed = max(10, (silence_samples // self.blocksize) + 1)
+                recent = np.concatenate(samples[-blocks_needed:]) if len(samples) >= blocks_needed else np.concatenate(samples)
+                # Only check if we have enough samples for the silence duration
+                if len(recent) >= silence_samples:
+                    rms = np.sqrt(np.mean(recent[-silence_samples:] ** 2))
+                    if rms < threshold:
+                        break
 
         return np.concatenate(samples) if samples else np.zeros(0, dtype=np.float32)
 

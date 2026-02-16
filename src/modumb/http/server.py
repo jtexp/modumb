@@ -199,14 +199,18 @@ class HttpServer:
         Returns:
             True if a connection was handled
         """
+        import sys
         if not self._running:
             return False
 
         # Accept connection
+        print(f'DEBUG SERVER: Waiting for session...', file=sys.stderr, flush=True)
         session = self._session_manager.accept_server_session(timeout=timeout)
         if session is None:
+            print(f'DEBUG SERVER: No session received', file=sys.stderr, flush=True)
             return False
 
+        print(f'DEBUG SERVER: Session established!', file=sys.stderr, flush=True)
         try:
             self._handle_session(session)
         finally:
@@ -231,9 +235,13 @@ class HttpServer:
 
     def _handle_session(self, session: Session) -> None:
         """Handle a single session (multiple requests)."""
+        import sys
+        print(f'DEBUG SERVER: Handling session...', file=sys.stderr, flush=True)
         while self._running and session.is_established:
             # Receive request
+            print(f'DEBUG SERVER: Waiting for request...', file=sys.stderr, flush=True)
             request_data = self._receive_request(session)
+            print(f'DEBUG SERVER: Got request data: {len(request_data) if request_data else 0} bytes', file=sys.stderr, flush=True)
             if not request_data:
                 break
 

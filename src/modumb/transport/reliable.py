@@ -16,9 +16,10 @@ from ..datalink.frame import Frame, FrameType, MAX_PAYLOAD_SIZE
 
 
 # ARQ parameters
-DEFAULT_TIMEOUT = 3.0       # Timeout for ACK (seconds)
-DEFAULT_RETRIES = 3         # Maximum retransmission attempts
+DEFAULT_TIMEOUT = 5.0       # Timeout for ACK (seconds) - longer for 300 baud
+DEFAULT_RETRIES = 5         # Maximum retransmission attempts
 DEFAULT_FRAGMENT_SIZE = MAX_PAYLOAD_SIZE  # Maximum fragment size
+TURNAROUND_GUARD = 0.1      # Wait time after receiving before sending (echo guard)
 
 
 @dataclass
@@ -106,6 +107,9 @@ class ReliableTransport:
         Returns:
             True if acknowledged, False on failure
         """
+        # Wait for receiver to be ready (echo guard period)
+        time.sleep(TURNAROUND_GUARD)
+
         seq = self._next_seq()
         frame = Frame.create_data(seq, data)
 

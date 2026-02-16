@@ -67,9 +67,9 @@ class GitRemoteHelper:
         self.http_client: Optional[HttpClient] = None
         self.git_client: Optional[GitSmartHttpClient] = None
 
-        # Use loopback for 'audio' host or if MODEM_LOOPBACK is set
+        # Use loopback only if MODEM_LOOPBACK is set or host is 'loopback'
+        # 'audio' host uses real audio through speakers/mic
         self.use_loopback = (
-            self.host == 'audio' or
             self.host == 'loopback' or
             os.environ.get('MODEM_LOOPBACK', '').lower() in ('1', 'true', 'yes')
         )

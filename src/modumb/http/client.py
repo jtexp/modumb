@@ -167,12 +167,16 @@ class HttpClient:
         )
 
         # Send request
+        import sys
         request_bytes = request.encode()
-        if not self.session.send(request_bytes):
-            return None
+        print(f'DEBUG HTTP: Sending request ({len(request_bytes)} bytes)', file=sys.stderr, flush=True)
+        send_result = self.session.send(request_bytes)
+        print(f'DEBUG HTTP: Send result: {send_result}', file=sys.stderr, flush=True)
 
-        # Receive response
+        # Receive response even if send "failed" (ACK may be lost but data delivered)
+        print(f'DEBUG HTTP: Receiving response...', file=sys.stderr, flush=True)
         response_data = self._receive_response(timeout)
+        print(f'DEBUG HTTP: Got {len(response_data) if response_data else 0} bytes response', file=sys.stderr, flush=True)
         if not response_data:
             return None
 

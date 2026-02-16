@@ -94,8 +94,8 @@ class AFSKDemodulator:
         self.samples_per_bit = sample_rate // baud_rate
 
         # Design bandpass filters for mark and space frequencies
-        # Using relatively wide bandwidth to handle frequency drift
-        bandwidth = 200  # Hz
+        # Using wider bandwidth to handle frequency drift and timing variations
+        bandwidth = 400  # Hz (increased to handle more variation)
 
         self.mark_filter = self._design_bandpass(
             mark_freq - bandwidth/2,
@@ -133,18 +133,40 @@ class AFSKDemodulator:
 
     def _envelope_detect(self, samples: np.ndarray, bandpass: tuple) -> np.ndarray:
         """Detect envelope of filtered signal."""
-        # Bandpass filter
-        filtered = signal.lfilter(bandpass[0], bandpass[1], samples)
+        # Use filtfilt for zero-phase filtering (no delay)
+        try:
+            # Pad signal to avoid edge effects
+            pad_len = 3 * max(len(bandpass[0]), len(bandpass[1]))
+            if len(samples) > pad_len:
+                filtered = signal.filtfilt(bandpass[0], bandpass[1], samples)
+            else:
+                filtered = signal.lfilter(bandpass[0], bandpass[1], samples)
+        except ValueError:
+            filtered = signal.lfilter(bandpass[0], bandpass[1], samples)
 
         # Full-wave rectification
         rectified = np.abs(filtered)
 
-        # Low-pass filter for envelope
-        envelope = signal.lfilter(
-            self.envelope_filter[0],
-            self.envelope_filter[1],
-            rectified
-        )
+        # Low-pass filter for envelope (also zero-phase)
+        try:
+            if len(rectified) > pad_len:
+                envelope = signal.filtfilt(
+                    self.envelope_filter[0],
+                    self.envelope_filter[1],
+                    rectified
+                )
+            else:
+                envelope = signal.lfilter(
+                    self.envelope_filter[0],
+                    self.envelope_filter[1],
+                    rectified
+                )
+        except ValueError:
+            envelope = signal.lfilter(
+                self.envelope_filter[0],
+                self.envelope_filter[1],
+                rectified
+            )
 
         return envelope
 
@@ -163,8 +185,103 @@ class AFSKDemodulator:
 
         return 1 if mark_energy > space_energy else 0
 
-    def demodulate(self, samples: np.ndarray) -> bytes:
-        """Demodulate audio samples into bytes."""
+    def find_signal_start(self, samples: np.ndarray, threshold_ratio: float = 0.3) -> int:
+        """Find where the signal starts in the samples.
+
+        Uses amplitude detection to find signal, then looks for
+        the preamble pattern (0xAA = alternating bits) to align on bit boundaries.
+
+        Args:
+            samples: Audio samples
+            threshold_ratio: Ratio of max amplitude to use as threshold
+
+        Returns:
+            Sample index where signal starts (aligned to bit boundary)
+        """
+        if len(samples) == 0:
+            return 0
+
+        # Find where amplitude exceeds threshold
+        max_amp = np.max(np.abs(samples))
+        if max_amp < 0.01:  # No signal
+            return 0
+
+        threshold = max_amp * threshold_ratio
+        above_threshold = np.where(np.abs(samples) > threshold)[0]
+
+        if len(above_threshold) == 0:
+            return 0
+
+        # Start searching a bit before the first threshold crossing
+        search_start = max(0, above_threshold[0] - self.samples_per_bit * 2)
+
+        return search_start
+
+    def demodulate(self, samples: np.ndarray, auto_sync: bool = True) -> bytes:
+        """Demodulate audio samples into bytes.
+
+        Args:
+            samples: Audio samples to demodulate
+            auto_sync: If True, automatically find signal start and bit alignment
+
+        Returns:
+            Demodulated bytes
+        """
+        if len(samples) < self.samples_per_bit * 8:
+            return b''
+
+        # Auto-detect signal start
+        if auto_sync:
+            base_offset = self.find_signal_start(samples)
+
+            # If signal is weak or no clear start, just demodulate from beginning
+            if base_offset <= 0:
+                return self._demodulate_raw(samples)
+
+            # Try different bit-phase offsets to find best alignment
+            # Search range: -2 to +3 bit periods around detected start
+            # Look for preamble pattern (0xAA)
+            best_result = b''
+            best_score = -1
+            first_result = None
+            step = max(1, self.samples_per_bit // 16)
+
+            search_start = max(0, base_offset - self.samples_per_bit * 2)
+            search_end = min(len(samples) - self.samples_per_bit * 8,
+                           base_offset + self.samples_per_bit * 3)
+
+            for offset in range(search_start, search_end, step):
+                result = self._demodulate_raw(samples[offset:])
+                if len(result) < 1:
+                    continue
+                if first_result is None:
+                    first_result = result
+                # Score by counting preamble bytes (0xAA) in first 16 bytes
+                # Also check for SYNC pattern (0x7E) after preamble
+                preamble_score = sum(1 for b in result[:16] if b == 0xAA)
+                # Bonus points if we find SYNC (0x7E) after preamble-like bytes
+                sync_bonus = 0
+                for i in range(8, min(20, len(result) - 1)):
+                    if result[i] == 0x7E and result[i+1] == 0x7E:
+                        sync_bonus = 4  # Strong bonus for finding SYNC
+                        break
+                score = preamble_score + sync_bonus
+                if score > best_score:
+                    best_score = score
+                    best_result = result
+                    if preamble_score >= 14 and sync_bonus > 0:  # Near-perfect
+                        break
+
+            # If no preamble found, return first result (fallback)
+            if best_score <= 0 and first_result is not None:
+                return first_result
+
+            return best_result
+        else:
+            return self._demodulate_raw(samples)
+
+    def _demodulate_raw(self, samples: np.ndarray) -> bytes:
+        """Demodulate without sync detection."""
         if len(samples) < self.samples_per_bit * 8:
             return b''
 
@@ -179,10 +296,6 @@ class AFSKDemodulator:
         for i in range(num_bits):
             start = i * self.samples_per_bit
             end = start + self.samples_per_bit
-
-            # Skip filter transient at start
-            if i < 2:
-                continue
 
             mark_energy = np.mean(mark_env[start:end])
             space_energy = np.mean(space_env[start:end])

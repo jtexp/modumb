@@ -47,3 +47,14 @@ Thumbs.db
 *.wav
 *.raw
 .claude/
+
+# Temporary test files
+/tmp/
+*.log
+*.tmp
+
+# Shell command artifacts (from heredoc/process substitution)
+cat
+echo
+wait
+"=== "*
