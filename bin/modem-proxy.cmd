@@ -1,5 +1,5 @@
 @echo off
-REM Modem Git Server on Windows
+REM Modem HTTP Proxy (Machine A) on Windows
 REM This wrapper calls the Python module directly
 
 setlocal
@@ -9,7 +9,7 @@ set "VENV_PYTHON=%PROJECT_DIR%\.venv\Scripts\python.exe"
 set "PYTHONPATH=%PROJECT_DIR%\src;%PYTHONPATH%"
 
 if exist "%VENV_PYTHON%" (
-    "%VENV_PYTHON%" -m modumb.http.server %*
+    "%VENV_PYTHON%" -m modumb.proxy.local_proxy %*
 ) else (
-    python -m modumb.http.server %*
+    python -m modumb.proxy.local_proxy %*
 )

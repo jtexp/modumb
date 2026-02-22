@@ -1,5 +1,5 @@
 @echo off
-REM Git remote helper for modem:// URLs on Windows
+REM Modem HTTP Relay (Machine B) on Windows
 REM This wrapper calls the Python module directly
 
 setlocal
@@ -9,7 +9,7 @@ set "VENV_PYTHON=%PROJECT_DIR%\.venv\Scripts\python.exe"
 set "PYTHONPATH=%PROJECT_DIR%\src;%PYTHONPATH%"
 
 if exist "%VENV_PYTHON%" (
-    "%VENV_PYTHON%" -m modumb.git.remote_helper %*
+    "%VENV_PYTHON%" -m modumb.proxy.remote_proxy %*
 ) else (
-    python -m modumb.git.remote_helper %*
+    python -m modumb.proxy.remote_proxy %*
 )

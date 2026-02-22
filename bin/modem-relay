@@ -1,5 +1,5 @@
 #!/bin/sh
-# Git remote helper for modem:// URLs
+# Modem HTTP Relay (Machine B — has internet)
 # Cross-platform wrapper that calls the Python module
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,4 +17,4 @@ fi
 # Add src to PYTHONPATH for development installs
 export PYTHONPATH="$PROJECT_DIR/src:$PYTHONPATH"
 
-exec "$PYTHON" -m modumb.git.remote_helper "$@"
+exec "$PYTHON" -m modumb.proxy.remote_proxy "$@"

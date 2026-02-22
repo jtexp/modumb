@@ -1,6 +1,6 @@
 """HTTP server over modem transport.
 
-Implements HTTP/1.1 server for Git smart HTTP protocol.
+Implements HTTP/1.1 server over modem session.
 """
 
 import re
@@ -333,52 +333,3 @@ class HttpServer:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.stop()
-
-
-def main():
-    """Run the modem git server."""
-    import argparse
-    import sys
-
-    parser = argparse.ArgumentParser(
-        description='Modem Git Server',
-        epilog='Use "modem-audio devices" to list available audio devices.'
-    )
-    parser.add_argument('repo_path', help='Path to git repository')
-    parser.add_argument('--loopback', action='store_true',
-                       help='Use loopback audio (no hardware)')
-    parser.add_argument('--audible', action='store_true',
-                       help='Play audio even in loopback mode (demo)')
-    parser.add_argument('-i', '--input-device', type=int, metavar='N',
-                       help='Input device index (microphone)')
-    parser.add_argument('-o', '--output-device', type=int, metavar='N',
-                       help='Output device index (speaker)')
-    args = parser.parse_args()
-
-    # Import git server handler
-    from ..git.smart_http import create_server_handler
-
-    # Create modem
-    modem = Modem(
-        loopback=args.loopback,
-        audible=args.audible,
-        input_device=args.input_device,
-        output_device=args.output_device,
-    )
-
-    # Create server
-    handler = create_server_handler(args.repo_path)
-    server = HttpServer(modem, handler=handler)
-
-    print(f'Starting modem git server for {args.repo_path}')
-    print('Listening for connections...')
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print('\nShutting down...')
-        server.stop()
-
-
-if __name__ == '__main__':
-    main()

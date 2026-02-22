@@ -1,6 +1,11 @@
 """Physical Layer - AFSK modem implementation."""
 
-__all__ = ["AFSKModulator", "AFSKDemodulator", "AudioInterface", "Modem"]
+from .profiles import AudioProfile, ACOUSTIC, CABLE, LOOPBACK, get_profile
+
+__all__ = [
+    "AFSKModulator", "AFSKDemodulator", "AudioInterface", "Modem",
+    "AudioProfile", "ACOUSTIC", "CABLE", "LOOPBACK", "get_profile",
+]
 
 
 def __getattr__(name):

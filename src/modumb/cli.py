@@ -121,8 +121,8 @@ def print_devices():
     print()
 
     print("Usage:")
-    print("  modem-git-server --input-device 3 --output-device 5 /path/to/repo")
-    print("  MODEM_INPUT_DEVICE=3 MODEM_OUTPUT_DEVICE=5 git clone modem://audio/repo")
+    print("  modem-proxy --input-device 3 --output-device 5")
+    print("  modem-relay --input-device 3 --output-device 5")
 
 
 def print_audio_setup_help(platform_info: dict):
@@ -156,7 +156,7 @@ Option 2: PulseAudio forwarding (Windows 10/11)
   5. Restart WSL2 and try again
 
 Option 3: Use loopback mode for testing
-  MODEM_LOOPBACK=1 git clone modem://audio/repo
+  modem-relay --mode loopback &  modem-proxy --mode loopback
 """)
 
     elif platform_info['is_wsl']:
@@ -165,7 +165,7 @@ WSL1 AUDIO SETUP:
 ================
 WSL1 has limited audio support. Consider upgrading to WSL2 with WSLg,
 or use loopback mode for testing:
-  MODEM_LOOPBACK=1 git clone modem://audio/repo
+  modem-relay --mode loopback &  modem-proxy --mode loopback
 """)
 
     elif platform_info['system'] == 'Linux':

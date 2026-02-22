@@ -1,8 +1,6 @@
 """HTTP Layer - HTTP client/server over modem."""
 
-from .pktline import PktLine
-
-__all__ = ["PktLine", "HttpClient", "HttpServer"]
+__all__ = ["HttpClient", "HttpServer"]
 
 
 def __getattr__(name):

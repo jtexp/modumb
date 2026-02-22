@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modumb"
-version = "0.1.0"
-description = "Acoustic Modem Git Transport System"
+version = "0.2.0"
+description = "HTTP Proxy Over Acoustic Modem"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -26,8 +26,8 @@ dev = [
 ]
 
 [project.scripts]
-git-remote-modem = "modumb.git.remote_helper:main"
-modem-git-server = "modumb.http.server:main"
+modem-proxy = "modumb.proxy.local_proxy:main"
+modem-relay = "modumb.proxy.remote_proxy:main"
 modem-audio = "modumb.cli:main"
 
 [tool.setuptools.packages.find]

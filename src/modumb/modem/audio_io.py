@@ -80,6 +80,8 @@ class AudioInterface:
         output_device: Optional[int] = None,
         loopback: bool = False,
         audible: bool = False,
+        echo_guard_time: Optional[float] = None,
+        hdmi_wake_enabled: Optional[bool] = None,
     ):
         """Initialize audio interface.
 
@@ -92,6 +94,8 @@ class AudioInterface:
             output_device: Output device index, or None for default/env
             loopback: If True, use internal loopback (for testing)
             audible: If True, play audio even in loopback mode (demo mode)
+            echo_guard_time: Seconds to suppress echo after TX (None = auto)
+            hdmi_wake_enabled: Enable HDMI wake workaround (None = auto-detect)
 
         Environment variables:
             MODEM_INPUT_DEVICE: Override input device
@@ -137,7 +141,7 @@ class AudioInterface:
         # Echo suppression state
         self._transmitting = False
         self._last_tx_end: float = 0.0
-        self._echo_guard_time: float = 0.08  # Time to wait after TX for echo to die
+        self._echo_guard_time: float = echo_guard_time if echo_guard_time is not None else 0.08
 
         # Auto-detect native device sample rate to avoid frequency shifting
         # (some devices like HDMI monitors don't resample, causing frequency drift)
@@ -148,7 +152,7 @@ class AudioInterface:
         self._last_output_time: float = time.time()
         self._hdmi_wake_timeout: float = 30.0  # Wake up if idle for more than 30 seconds
         self._hdmi_wake_duration: float = 0.3  # Duration of wake-up tone
-        self._hdmi_wake_enabled: bool = self._detect_hdmi_device()
+        self._hdmi_wake_enabled: bool = hdmi_wake_enabled if hdmi_wake_enabled is not None else self._detect_hdmi_device()
 
     def _detect_native_sample_rate(self) -> int:
         """Detect the native sample rate of the output device.

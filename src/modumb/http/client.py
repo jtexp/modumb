@@ -1,6 +1,6 @@
 """HTTP client over modem transport.
 
-Implements HTTP/1.1 client for Git smart HTTP protocol.
+Implements HTTP/1.1 client over modem session.
 Uses Content-Length based framing.
 """
 

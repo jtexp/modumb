@@ -1,5 +1,5 @@
 #!/bin/sh
-# Modem Git Server
+# Modem HTTP Proxy (Machine A — no internet)
 # Cross-platform wrapper that calls the Python module
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,4 +17,4 @@ fi
 # Add src to PYTHONPATH for development installs
 export PYTHONPATH="$PROJECT_DIR/src:$PYTHONPATH"
 
-exec "$PYTHON" -m modumb.http.server "$@"
+exec "$PYTHON" -m modumb.proxy.local_proxy "$@"

@@ -7,11 +7,14 @@ to provide a simple byte-oriented interface.
 import os
 import threading
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 import numpy as np
 
 from .afsk import AFSKModulator, AFSKDemodulator, SAMPLE_RATE, BAUD_RATE, SAMPLES_PER_BIT
 from .audio_io import AudioInterface, LoopbackAudioInterface
+
+if TYPE_CHECKING:
+    from .profiles import AudioProfile
 
 
 # Timing constants
@@ -31,6 +34,7 @@ class Modem:
         input_device: Optional[int] = None,
         output_device: Optional[int] = None,
         tx_volume: Optional[float] = None,
+        profile: Optional["AudioProfile"] = None,
     ):
         """Initialize modem.
 
@@ -42,33 +46,48 @@ class Modem:
             audible: If True, play audio even in loopback mode (demo)
             input_device: Input device index (microphone)
             output_device: Output device index (speaker)
-            tx_volume: Transmit volume (0.0-1.0), default from MODEM_TX_VOLUME or 0.08
+            tx_volume: Transmit volume (0.0-1.0), overrides profile
+            profile: Audio profile with transmission parameters
 
         Environment variables (if devices not specified):
             MODEM_INPUT_DEVICE: Input device index
             MODEM_OUTPUT_DEVICE: Output device index
             MODEM_LOOPBACK: Enable loopback mode (1/true/yes)
             MODEM_AUDIBLE: Play audio in loopback mode (1/true/yes)
-            MODEM_TX_VOLUME: Transmit volume 0.0-1.0 (default 0.08)
+            MODEM_TX_VOLUME: Transmit volume 0.0-1.0
         """
         self.baud_rate = baud_rate
+        self.profile = profile
 
-        # TX volume: low default to avoid clipping on sensitive microphones
+        # TX volume priority: explicit arg > env var > profile > default
         if tx_volume is not None:
             self.tx_volume = tx_volume
         else:
             env_vol = os.environ.get('MODEM_TX_VOLUME')
-            self.tx_volume = float(env_vol) if env_vol else 0.08
+            if env_vol:
+                self.tx_volume = float(env_vol)
+            elif profile:
+                self.tx_volume = profile.tx_volume
+            else:
+                self.tx_volume = 0.08
+
+        # Silence durations from profile
+        self._lead_silence = profile.lead_silence if profile else 0.3
+        self._trail_silence = profile.trail_silence if profile else 0.2
 
         # Create audio interface if not provided
         if audio is None:
-            audio = AudioInterface(
+            audio_kwargs = dict(
                 sample_rate=sample_rate,
                 loopback=loopback,
                 audible=audible,
                 input_device=input_device,
                 output_device=output_device,
             )
+            if profile:
+                audio_kwargs['echo_guard_time'] = profile.echo_guard_time
+                audio_kwargs['hdmi_wake_enabled'] = profile.hdmi_wake_enabled
+            audio = AudioInterface(**audio_kwargs)
         self.audio = audio
 
         # Use the audio interface's actual sample rate (may differ from requested
@@ -114,8 +133,8 @@ class Modem:
 
             # Leading silence lets the acoustic channel and demodulator filters settle.
             # Trailing silence ensures the receiver detects end-of-frame silence.
-            lead_silence = np.zeros(int(0.3 * self.sample_rate), dtype=np.float32)
-            trail_silence = np.zeros(int(0.2 * self.sample_rate), dtype=np.float32)
+            lead_silence = np.zeros(int(self._lead_silence * self.sample_rate), dtype=np.float32)
+            trail_silence = np.zeros(int(self._trail_silence * self.sample_rate), dtype=np.float32)
             samples = np.concatenate([lead_silence, samples, trail_silence])
 
             # Transmit

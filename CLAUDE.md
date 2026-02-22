@@ -4,77 +4,88 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Modumb is an acoustic modem that enables `git clone` over sound waves. It uses AFSK (Audio Frequency Shift Keying) at 300 baud (~37.5 bytes/sec) with a full 5-layer protocol stack modeled on OSI.
+Modumb is an HTTP proxy over acoustic modem. Machine A (no internet) runs a local proxy; Machine B (has internet) runs a relay. They communicate over AFSK (Audio Frequency Shift Keying) at 300 baud via speaker/mic or audio cable.
 
-## Build & Test Commands
+## Python Environment
+
+**We develop in WSL2 but always run Python via the Windows venv.** Never install to WSL system Python.
 
 ```bash
+# All commands go through the Windows venv Python:
+PY="/mnt/c/Users/John/modumb/.venv/Scripts/python.exe"
+
 # Install (editable)
-pip install -e .
+$PY -m pip install -e ".[dev]"
 
 # Run all unit tests
-pytest tests/ -v
+$PY -m pytest tests/ -v
 
 # Run tests with coverage
-pytest tests/ -v --cov=modumb
+$PY -m pytest tests/ -v --cov=modumb
 
 # Run a single test file
-pytest tests/test_afsk.py -v
+$PY -m pytest tests/test_profiles.py -v
 
 # Run a single test by name
-pytest tests/test_frame.py -v -k "test_roundtrip"
-
-# End-to-end loopback test (creates repo, starts server, clones via modem)
-./scripts/run-loopback-test.sh
-
-# AFSK modem layer test
-./scripts/test-audio-loopback.sh
+$PY -m pytest tests/test_proxy.py -v -k "test_connect_returns_501"
 ```
 
-On Windows (from WSL2), use the Windows venv Python for scripts needing audio:
+For scripts needing Windows audio devices:
 ```bash
-.venv/Scripts/python.exe "C:/Users/John/modumb/scripts/<script>.py"
+$PY "C:/Users/John/modumb/scripts/<script>.py"
 ```
 
 ## Architecture
 
-Five-layer protocol stack, bottom to top:
+Five-layer protocol stack (layers 1-4), plus proxy layer on top:
 
 | Layer | Module | Role |
 |-------|--------|------|
-| 1. Physical | `modem/afsk.py`, `modem/audio_io.py`, `modem/modem.py` | AFSK modulation (1200/2200 Hz), audio I/O via sounddevice |
-| 2. Data Link | `datalink/frame.py`, `datalink/framer.py` | Framing with preamble + sync, HDLC byte stuffing, CRC-16-CCITT. Max 64-byte payload (clock drift limit) |
+| 1. Physical | `modem/afsk.py`, `modem/audio_io.py`, `modem/modem.py`, `modem/profiles.py` | AFSK modulation (1200/2200 Hz), audio I/O, audio profiles (acoustic/cable/loopback) |
+| 2. Data Link | `datalink/frame.py`, `datalink/framer.py` | Framing with preamble + sync, HDLC byte stuffing, CRC-16-CCITT. Max 64-byte payload |
 | 3. Transport | `transport/reliable.py`, `transport/session.py` | Stop-and-Wait ARQ (5s timeout, 5 retries), 3-way handshake session management |
-| 4. HTTP | `http/client.py`, `http/server.py`, `http/pktline.py` | HTTP/1.1 over modem, plus Git pkt-line format |
-| 5. Git | `git/remote_helper.py`, `git/smart_http.py` | Git remote helper for `modem://` URLs, Git Smart HTTP protocol |
+| 4. HTTP | `http/client.py`, `http/server.py` | HTTP/1.1 client/server over modem session |
+| 5. Proxy | `proxy/local_proxy.py`, `proxy/remote_proxy.py`, `proxy/config.py` | Local HTTP proxy (Machine A) and remote relay (Machine B) |
 
 All source is under `src/modumb/`. Each layer's `__init__.py` uses `__getattr__` for lazy imports (defers numpy/scipy loading).
 
 ## Data Flow
 
-`git clone modem://audio/repo` triggers:
-1. Git invokes `git-remote-modem` (remote helper protocol)
-2. Remote helper builds the full stack: Modem → Framer → ReliableTransport → Session → HttpClient → GitSmartHttpClient
-3. Session does 3-way handshake (SYN/SYN-ACK/ACK)
-4. HTTP requests flow down through transport → framing → AFSK → speaker
-5. Server receives audio → demodulates → decodes frames → parses HTTP → runs git-upload-pack → responds back through the stack
+```
+Browser → LocalProxy(:8080) → modem session → RemoteRelay → urllib → Internet
+                              ← modem session ←            ← response
+```
+
+1. Browser sends `GET http://example.com/path` to LocalProxy on localhost:8080
+2. LocalProxy forwards the full HTTP request over the modem session via HttpClient
+3. RemoteRelay receives it via HttpServer, fetches from the real internet via `urllib`
+4. Response flows back: RemoteRelay → modem → LocalProxy → browser
 
 ## Entry Points
 
 Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrappers in `bin/`:
-- **git-remote-modem** → `modumb.git.remote_helper:main` — called by git for `modem://` URLs
-- **modem-git-server** → `modumb.http.server:main` — serves git repos over acoustic modem
+- **modem-proxy** → `modumb.proxy.local_proxy:main` — Machine A local HTTP proxy
+- **modem-relay** → `modumb.proxy.remote_proxy:main` — Machine B internet relay
 - **modem-audio** → `modumb.cli:main` — audio device listing and testing (`devices`, `test`)
 
 ## Key Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
+| `MODEM_MODE` | `acoustic`, `cable`, or `loopback` (selects audio profile) |
 | `MODEM_LOOPBACK` | `1` to bypass real audio (uses in-memory buffer) |
 | `MODEM_AUDIBLE` | Play audio even in loopback mode |
 | `MODEM_INPUT_DEVICE` / `MODEM_OUTPUT_DEVICE` | Audio device indices |
-| `MODEM_TX_VOLUME` | Transmit volume 0.0–1.0 (default 0.08) |
+| `MODEM_TX_VOLUME` | Transmit volume 0.0–1.0 (overrides profile default) |
 | `PULSE_SERVER` | PulseAudio server address for WSL2 |
+
+## Audio Profiles
+
+| Profile | tx_volume | echo_guard | lead_silence | hdmi_wake | Use case |
+|---------|-----------|------------|--------------|-----------|----------|
+| `acoustic` | 0.08 | 80ms | 300ms | yes | Speaker → microphone |
+| `cable` | 0.5 | 0 | 100ms | no | 3.5mm audio cable |
+| `loopback` | 1.0 | 0 | 0 | no | In-memory testing |
 
 ## Critical Parameters
 
@@ -83,7 +94,7 @@ Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrap
 - **Sample rate**: 48000 Hz (auto-adjusts to device native rate)
 - **Max frame payload**: 64 bytes (larger causes bit errors from clock drift)
 - **ARQ timeout**: 5 seconds
-- **Echo guard**: 80ms post-TX silence (half-duplex)
+- **Echo guard**: 80ms post-TX silence (acoustic mode, half-duplex)
 - **Filter bandwidth**: 400 Hz (tuned for clock drift tolerance)
 
 ## Frame Format
@@ -98,5 +109,5 @@ Frame types: DATA, ACK, NAK, SYN, SYN-ACK, FIN, RST.
 
 - **Windows**: Works out of the box with sounddevice
 - **Linux/WSL2**: Requires `libportaudio2 portaudio19-dev`
-- **WSL2 audio**: Use WSLg (Win11), PulseAudio, or `MODEM_LOOPBACK=1`
+- **WSL2 audio**: Use WSLg (Win11), PulseAudio, or `--mode loopback`
 - **macOS**: Requires `brew install portaudio` and microphone permission
