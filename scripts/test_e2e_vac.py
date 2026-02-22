@@ -28,7 +28,8 @@ import urllib.error
 # Configuration
 # ---------------------------------------------------------------------------
 
-PY = os.path.join(os.path.dirname(__file__), '..', '.venv', 'Scripts', 'python.exe')
+PY = os.environ.get('MODUMB_PYTHON',
+                     os.path.join(os.path.dirname(__file__), '..', '.venv', 'Scripts', 'python.exe'))
 
 # VAC Cable 1: LocalProxy TX -> RemoteRelay RX
 VAC1_OUTPUT = 11  # Line Out (Virtual Cable 1)
