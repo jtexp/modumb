@@ -182,11 +182,12 @@ class TestConnectHandler:
     """Test create_connect_handler."""
 
     def test_opens_tcp_to_correct_host_port(self):
+        from modumb.proxy.tunnel import _CLOSE_SENTINEL
         config = ProxyConfig()
         handler = create_connect_handler(config)
         session = MagicMock()
         # Close signal immediately so handler exits after connecting
-        close_chunk = struct.pack('<I', 0)
+        close_chunk = struct.pack('<I', _CLOSE_SENTINEL)
         session.receive = MagicMock(return_value=close_chunk)
 
         with patch("modumb.proxy.remote_proxy.socket.create_connection") as mock_conn:
@@ -197,10 +198,11 @@ class TestConnectHandler:
             mock_sock.close.assert_called_once()
 
     def test_defaults_to_port_443(self):
+        from modumb.proxy.tunnel import _CLOSE_SENTINEL
         config = ProxyConfig()
         handler = create_connect_handler(config)
         session = MagicMock()
-        close_chunk = struct.pack('<I', 0)
+        close_chunk = struct.pack('<I', _CLOSE_SENTINEL)
         session.receive = MagicMock(return_value=close_chunk)
 
         with patch("modumb.proxy.remote_proxy.socket.create_connection") as mock_conn:
@@ -210,6 +212,7 @@ class TestConnectHandler:
             mock_conn.assert_called_once_with(("example.com", 443), timeout=10)
 
     def test_sends_close_on_upstream_connect_failure(self):
+        from modumb.proxy.tunnel import _CLOSE_SENTINEL
         config = ProxyConfig()
         handler = create_connect_handler(config)
         session = MagicMock()
@@ -218,10 +221,10 @@ class TestConnectHandler:
         with patch("modumb.proxy.remote_proxy.socket.create_connection",
                     side_effect=ConnectionRefusedError("refused")):
             handler(session, "example.com:443")
-        # Should have sent a close signal (4 zero bytes)
+        # Should have sent a close signal (sentinel value)
         session.send.assert_called_once()
         sent = session.send.call_args[0][0]
-        assert sent == struct.pack('<I', 0)
+        assert sent == struct.pack('<I', _CLOSE_SENTINEL)
 
 
 class TestHopByHop:

@@ -4,7 +4,10 @@ import struct
 import pytest
 from unittest.mock import MagicMock
 
-from modumb.proxy.tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK
+from modumb.proxy.tunnel import (
+    send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK,
+    _CLOSE_SENTINEL,
+)
 
 
 def _mock_session(receive_returns=None):
@@ -27,12 +30,12 @@ class TestSendChunk:
         assert sent[:4] == struct.pack('<I', 5)
         assert sent[4:] == b"hello"
 
-    def test_sends_empty_close_signal(self):
+    def test_sends_close_signal_sentinel(self):
         session = _mock_session()
         result = send_close(session)
         assert result is True
         sent = session.send.call_args[0][0]
-        assert sent == struct.pack('<I', 0)
+        assert sent == struct.pack('<I', _CLOSE_SENTINEL)
 
     def test_returns_false_on_send_failure(self):
         session = _mock_session()
@@ -58,6 +61,12 @@ class TestReceiveChunk:
         assert result == data
 
     def test_receives_close_signal(self):
+        header = struct.pack('<I', _CLOSE_SENTINEL)
+        session = _mock_session(receive_returns=[header])
+        result = receive_chunk(session)
+        assert result is None
+
+    def test_receives_empty_keepalive(self):
         header = struct.pack('<I', 0)
         session = _mock_session(receive_returns=[header])
         result = receive_chunk(session)

@@ -17,9 +17,20 @@ from ..transport.session import Session
 
 MAX_TUNNEL_CHUNK = 2048
 
+# Max data bytes per chunk sent over modem. Keeps each chunk to ~4 modem
+# frames (192 data + 4-byte header = 196 bytes = 4 frames at 64B payload).
+# Larger chunks cause 6+ consecutive frames in one direction which can
+# trigger audio decode failures on some VAC/cable setups.
+MODEM_CHUNK_SIZE = 192
+
+# Sentinel value for close signal (distinct from length=0 keepalive)
+_CLOSE_SENTINEL = 0xFFFFFFFF
+
 
 def send_chunk(session: Session, data: bytes) -> bool:
     """Send a length-prefixed chunk over the session.
+
+    Length=0 is a valid keepalive (empty data). Close uses a sentinel.
 
     Args:
         session: Modem session
@@ -42,7 +53,7 @@ def receive_chunk(session: Session, timeout: float = 30.0) -> Optional[bytes]:
         timeout: Timeout for each receive call
 
     Returns:
-        Chunk data (b'' for close signal, None for error/timeout)
+        Chunk data (b'' for empty keepalive, None for close/error/timeout)
     """
     buf = bytearray()
 
@@ -56,6 +67,10 @@ def receive_chunk(session: Session, timeout: float = 30.0) -> Optional[bytes]:
     length = struct.unpack('<I', buf[:4])[0]
 
     # Close signal
+    if length == _CLOSE_SENTINEL:
+        return None
+
+    # Empty keepalive
     if length == 0:
         return b''
 
@@ -71,7 +86,7 @@ def receive_chunk(session: Session, timeout: float = 30.0) -> Optional[bytes]:
 
 
 def send_close(session: Session) -> bool:
-    """Send close signal (length=0).
+    """Send close signal (sentinel value).
 
     Args:
         session: Modem session
@@ -79,4 +94,4 @@ def send_close(session: Session) -> bool:
     Returns:
         True if sent successfully
     """
-    return session.send(struct.pack('<I', 0))
+    return session.send(struct.pack('<I', _CLOSE_SENTINEL))

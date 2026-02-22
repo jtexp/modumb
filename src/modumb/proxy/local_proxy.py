@@ -20,7 +20,7 @@ from ..datalink.framer import Framer
 from ..modem.modem import Modem
 from ..modem.profiles import get_profile, AudioProfile
 from .config import ProxyConfig
-from .tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK
+from .tunnel import send_chunk, receive_chunk, send_close, MODEM_CHUNK_SIZE
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -190,40 +190,31 @@ class LocalProxy:
                     session = proxy._http_client.session
 
                     try:
+                        poll_timeout = 0.1  # Fast poll when data flowing
+
                         while True:
-                            # Wait for browser data
-                            ready, _, _ = select.select([browser_sock], [], [], 5.0)
-                            if not ready:
-                                # Keepalive: send empty data, get relay response
-                                send_chunk(session, b'')
-                                server_data = receive_chunk(session, timeout=30.0)
-                                if server_data is None:
+                            # Check for browser data (bounded read)
+                            ready, _, _ = select.select(
+                                [browser_sock], [], [], poll_timeout)
+                            if ready:
+                                try:
+                                    client_data = browser_sock.recv(
+                                        MODEM_CHUNK_SIZE)
+                                except (BlockingIOError, ConnectionError):
+                                    client_data = b''
+                                if not client_data:
+                                    send_close(session)
                                     break
-                                if server_data == b'':
-                                    break
-                                if server_data:
-                                    browser_sock.sendall(server_data)
-                                continue
+                            else:
+                                client_data = b''  # Keepalive
 
-                            try:
-                                client_data = browser_sock.recv(MAX_TUNNEL_CHUNK)
-                            except (BlockingIOError, ConnectionError):
-                                client_data = b''
-
-                            if not client_data:
-                                # Browser closed
-                                send_close(session)
-                                break
-
-                            # Send browser data to relay
+                            # Send to relay (data or empty keepalive)
                             if not send_chunk(session, client_data):
                                 break
 
-                            # Receive relay response
+                            # Receive relay response (None = close/error)
                             server_data = receive_chunk(session, timeout=30.0)
                             if server_data is None:
-                                break
-                            if server_data == b'':
                                 break
 
                             # Forward to browser
@@ -233,6 +224,11 @@ class LocalProxy:
                                 except (BrokenPipeError, ConnectionError):
                                     send_close(session)
                                     break
+                                poll_timeout = 0.1  # Data flowing, poll fast
+                            elif client_data:
+                                poll_timeout = 0.1  # We sent data, expect reply
+                            else:
+                                poll_timeout = 5.0  # Idle, slow poll
                     except Exception as e:
                         print(f"PROXY CONNECT: Tunnel error: {e}",
                               file=sys.stderr, flush=True)

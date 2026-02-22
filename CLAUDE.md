@@ -165,13 +165,16 @@ minimum (HTTP half-duplex, HTTP full-duplex, HTTPS half-duplex — all at 1200 b
 Before finishing a session that touched modem/datalink/transport/HTTP/proxy code,
 run the VAC e2e smoke tests. These catch audio timing regressions that unit tests miss.
 
+We run from WSL2 but the Windows venv Python has full access to VAC audio devices,
+so e2e tests always work. **Do not skip them** for modem/proxy code changes.
+
 ```bash
 PY="/mnt/c/Users/John/modumb/.venv/Scripts/python.exe"
 
 # 1. Unit tests (always)
 $PY -m pytest tests/ -v
 
-# 2. VAC e2e smoke tests (if any modem/datalink/transport/HTTP/proxy code changed)
+# 2. VAC e2e smoke tests (always, when modem/datalink/transport/HTTP/proxy code changed)
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex half
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200 --duplex half

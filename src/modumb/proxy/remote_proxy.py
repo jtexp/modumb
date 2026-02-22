@@ -17,7 +17,7 @@ from ..transport.session import Session
 from ..modem.modem import Modem
 from ..modem.profiles import get_profile, AudioProfile
 from .config import ProxyConfig
-from .tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK
+from .tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK, MODEM_CHUNK_SIZE
 
 
 # Hop-by-hop headers that must not be forwarded (RFC 2616 §13.5.1)
@@ -181,45 +181,41 @@ def create_connect_handler(config: ProxyConfig) -> ConnectHandler:
 
         try:
             upstream.setblocking(False)
-            initial_timeout = 2.0
-            subsequent_timeout = 0.2
+            tcp_closed = False
 
             while True:
-                # Receive client data from modem
+                # Receive client data from modem (None = close/error)
                 client_data = receive_chunk(session, timeout=30.0)
                 if client_data is None:
-                    print("RELAY CONNECT: Modem receive timeout/error",
-                          file=sys.stderr, flush=True)
-                    break
-                if client_data == b'':
-                    print("RELAY CONNECT: Client sent close signal",
+                    print("RELAY CONNECT: Client closed or timeout",
                           file=sys.stderr, flush=True)
                     break
 
                 # Forward to upstream TCP
-                try:
-                    upstream.sendall(client_data)
-                except Exception as e:
-                    print(f"RELAY CONNECT: TCP send error: {e}",
-                          file=sys.stderr, flush=True)
-                    break
+                if client_data:
+                    try:
+                        upstream.sendall(client_data)
+                    except Exception as e:
+                        print(f"RELAY CONNECT: TCP send error: {e}",
+                              file=sys.stderr, flush=True)
+                        break
 
-                # Read response from upstream (non-blocking with select)
+                # Read response from upstream, bounded to MODEM_CHUNK_SIZE
                 server_data = bytearray()
-                read_timeout = initial_timeout
-                while True:
+                read_timeout = 0.5
+                while len(server_data) < MODEM_CHUNK_SIZE:
                     ready, _, _ = select.select([upstream], [], [], read_timeout)
                     if not ready:
                         break
                     try:
-                        chunk = upstream.recv(MAX_TUNNEL_CHUNK)
+                        chunk = upstream.recv(MODEM_CHUNK_SIZE - len(server_data))
                     except (BlockingIOError, ConnectionError):
                         break
                     if not chunk:
-                        # TCP closed by upstream
+                        tcp_closed = True
                         break
                     server_data.extend(chunk)
-                    read_timeout = subsequent_timeout
+                    read_timeout = 0.05  # Fast burst reads after first data
 
                 # Send server response back over modem
                 if not send_chunk(session, bytes(server_data)):
@@ -227,8 +223,7 @@ def create_connect_handler(config: ProxyConfig) -> ConnectHandler:
                           file=sys.stderr, flush=True)
                     break
 
-                # If upstream TCP closed (recv returned empty), we're done
-                if ready and not chunk:
+                if tcp_closed:
                     send_close(session)
                     break
 
