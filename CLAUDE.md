@@ -76,6 +76,7 @@ Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrap
 | `MODEM_LOOPBACK` | `1` to bypass real audio (uses in-memory buffer) |
 | `MODEM_AUDIBLE` | Play audio even in loopback mode |
 | `MODEM_INPUT_DEVICE` / `MODEM_OUTPUT_DEVICE` | Audio device indices |
+| `MODEM_BAUD_RATE` | Baud rate: 300 (default) or 1200 |
 | `MODEM_TX_VOLUME` | Transmit volume 0.0-1.0 (overrides profile default) |
 | `PULSE_SERVER` | PulseAudio server address for WSL2 |
 
@@ -90,10 +91,10 @@ Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrap
 ## Critical Parameters
 
 - **Mark/Space frequencies**: 1200 Hz / 2200 Hz (Bell 202 style)
-- **Baud rate**: 300
+- **Baud rate**: 300 (default), 1200 (via `--baud-rate 1200` or `MODEM_BAUD_RATE=1200`)
 - **Sample rate**: 48000 Hz (preferred; auto-falls back to device native rate)
 - **Max frame payload**: 64 bytes (larger causes bit errors from clock drift)
-- **ARQ timeout**: 5 seconds
+- **ARQ timeout**: baud-scaled via `timeout_for_baud()` (~6.7s at 300, ~2.2s at 1200)
 - **Echo guard**: 80ms post-TX silence (acoustic mode, half-duplex)
 - **Filter bandwidth**: 400 Hz (tuned for clock drift tolerance)
 - **Post-handshake delay**: 0.5s (lets remote side process ACK before DATA)
@@ -132,12 +133,28 @@ Device indices may vary by system -- use `modem-audio devices` to discover them.
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium
 
+# E2e at 1200 baud
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
+
 # Modem-to-modem frame exchange diagnostic
 $PY "C:/Users/John/modumb/scripts/diag_modem_exchange.py"
 
 # Single-cable frame roundtrip diagnostic
 $PY "C:/Users/John/modumb/scripts/diag_vac_frame.py"
 ```
+
+### When to run VAC e2e tests
+
+**After any change to modem, datalink, transport, HTTP, or proxy layers**, run the
+VAC e2e tests if Virtual Audio Cable devices are available on the machine. At minimum:
+
+```bash
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
+```
+
+Both baud rates must pass. Unit tests alone do not catch audio timing, clock drift,
+or real-device I/O regressions that only surface over actual (virtual) audio cables.
 
 ## Issue Tracking
 
