@@ -30,6 +30,17 @@ except (ImportError, OSError) as e:
     SOUNDDEVICE_AVAILABLE = False
     SOUNDDEVICE_ERROR = str(e)
 
+# Try pygame as fallback for Windows HDMI audio issues
+try:
+    import pygame
+    PYGAME_AVAILABLE = True
+except ImportError:
+    pygame = None  # type: ignore
+    PYGAME_AVAILABLE = False
+
+import platform
+import sys
+
 from .afsk import SAMPLE_RATE
 
 
@@ -127,6 +138,89 @@ class AudioInterface:
         self._transmitting = False
         self._last_tx_end: float = 0.0
         self._echo_guard_time: float = 0.08  # Time to wait after TX for echo to die
+
+        # Auto-detect native device sample rate to avoid frequency shifting
+        # (some devices like HDMI monitors don't resample, causing frequency drift)
+        if SOUNDDEVICE_AVAILABLE and not self.loopback:
+            self.sample_rate = self._detect_native_sample_rate()
+
+        # HDMI wake-up state (for Intel HDMI audio sleep bug)
+        self._last_output_time: float = time.time()
+        self._hdmi_wake_timeout: float = 30.0  # Wake up if idle for more than 30 seconds
+        self._hdmi_wake_duration: float = 0.3  # Duration of wake-up tone
+        self._hdmi_wake_enabled: bool = self._detect_hdmi_device()
+
+    def _detect_native_sample_rate(self) -> int:
+        """Detect the native sample rate of the output device.
+
+        Some audio devices (especially HDMI monitors) don't resample,
+        so playing at a non-native rate shifts all frequencies. We detect
+        the native rate and use it to avoid this issue.
+        """
+        native_rate = self.sample_rate
+        try:
+            if self.output_device is not None:
+                dev_info = sd.query_devices(self.output_device)
+                native_rate = int(dev_info['default_samplerate'])
+        except Exception:
+            pass
+
+        if native_rate != self.sample_rate:
+            print(f"DEBUG AUDIO: Output device native rate is {native_rate} Hz, "
+                  f"adjusting from {self.sample_rate} Hz",
+                  file=sys.stderr, flush=True)
+
+        return native_rate
+
+    def _detect_hdmi_device(self) -> bool:
+        """Detect if output device is HDMI/DisplayPort (needs wake-up workaround)."""
+        if not SOUNDDEVICE_AVAILABLE or self.output_device is None:
+            return False
+        try:
+            dev_info = sd.query_devices(self.output_device)
+            name = dev_info.get('name', '').lower()
+            # Check for HDMI/DisplayPort audio indicators
+            hdmi_keywords = ['hdmi', 'display', 'intel(r) display', 'displayport', 'dp audio']
+            return any(kw in name for kw in hdmi_keywords)
+        except Exception:
+            return False
+
+    def wake_up_output(self) -> None:
+        """Wake up HDMI/DisplayPort audio device if it may be sleeping.
+
+        Intel HDMI audio has a known "silent stream" bug where the device
+        goes to sleep after a few seconds of inactivity, causing long delays
+        when audio playback resumes.
+        """
+        if not self._hdmi_wake_enabled or self.loopback:
+            return
+
+        current_time = time.time()
+        time_since_last = current_time - self._last_output_time
+
+        if time_since_last > self._hdmi_wake_timeout:
+            import sys
+            print(f"DEBUG AUDIO: Waking up HDMI output (idle for {time_since_last:.1f}s)...",
+                  file=sys.stderr, flush=True)
+
+            # Play a brief tone to wake up the device
+            wake_samples = int(self._hdmi_wake_duration * self.sample_rate)
+            t = np.arange(wake_samples) / self.sample_rate
+            # Use a gentle sine wave that ramps up and down
+            envelope = np.sin(np.pi * t / self._hdmi_wake_duration)
+            wake_tone = 0.3 * envelope * np.sin(2 * np.pi * 1000 * t)
+            wake_tone = wake_tone.astype(np.float32)
+
+            # Play and wait
+            sd.play(wake_tone, self.sample_rate, device=self.output_device)
+            sd.wait()
+
+            # Small delay to let the device stabilize
+            time.sleep(0.1)
+
+            print(f"DEBUG AUDIO: HDMI wake-up complete", file=sys.stderr, flush=True)
+
+        self._last_output_time = current_time
 
     def start(self) -> None:
         """Start audio streams."""
@@ -244,6 +338,9 @@ class AudioInterface:
                     sd.wait()
             return
 
+        # Wake up HDMI device if needed (Intel HDMI sleep bug workaround)
+        self.wake_up_output()
+
         # Echo suppression: mark as transmitting, clear buffer
         self._transmitting = True
         self.clear_receive_buffer()
@@ -257,6 +354,7 @@ class AudioInterface:
         # Echo suppression: record end time, clear any echo that snuck through
         self._transmitting = False
         self._last_tx_end = time.time()
+        self._last_output_time = time.time()  # Track for HDMI wake-up
         self.clear_receive_buffer()
 
     def receive(self, num_samples: int, timeout: float = 5.0) -> np.ndarray:

@@ -32,8 +32,8 @@ class SessionState(Enum):
 @dataclass
 class SessionConfig:
     """Configuration for session management."""
-    connect_timeout: float = 5.0
-    handshake_retries: int = 3
+    connect_timeout: float = 8.0
+    handshake_retries: int = 5
     close_timeout: float = 2.0
 
 

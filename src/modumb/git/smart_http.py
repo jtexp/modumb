@@ -10,6 +10,7 @@ References:
 - https://git-scm.com/docs/protocol-v2
 """
 
+import shutil
 import subprocess
 import os
 from typing import Optional, Dict, List, Callable
@@ -182,6 +183,7 @@ class GitSmartHttpServer:
             repo_path: Path to git repository
         """
         self.repo_path = os.path.abspath(repo_path)
+        self._git_cmd_cache: Dict[str, List[str]] = {}
 
         # Verify it's a git repo
         git_dir = os.path.join(self.repo_path, '.git')
@@ -192,6 +194,25 @@ class GitSmartHttpServer:
             self.git_dir = self.repo_path
         else:
             raise ValueError(f'Not a git repository: {repo_path}')
+
+    def _resolve_git_cmd(self, service: str) -> list[str]:
+        """Resolve a git service command (e.g. 'git-upload-pack') to an executable.
+
+        On Windows, git-upload-pack may not be on PATH. Falls back to
+        'git upload-pack' subcommand form which always works.
+        """
+        if service in self._git_cmd_cache:
+            return self._git_cmd_cache[service]
+
+        # Try direct command first
+        if shutil.which(service):
+            cmd = [service]
+        else:
+            # Fall back to 'git <subcommand>' form (strip 'git-' prefix)
+            subcommand = service.replace('git-', '', 1)
+            cmd = ['git', subcommand]
+        self._git_cmd_cache[service] = cmd
+        return cmd
 
     def handle_info_refs(self, service: str) -> HttpServerResponse:
         """Handle /info/refs endpoint.
@@ -207,8 +228,9 @@ class GitSmartHttpServer:
 
         # Call git to get ref advertisement
         try:
+            cmd = self._resolve_git_cmd(service)
             result = subprocess.run(
-                [service, '--stateless-rpc', '--advertise-refs', self.repo_path],
+                cmd + ['--stateless-rpc', '--advertise-refs', self.repo_path],
                 capture_output=True,
                 timeout=30,
             )
@@ -249,8 +271,9 @@ class GitSmartHttpServer:
         """
         try:
             # Call git-upload-pack with the request
+            cmd = self._resolve_git_cmd('git-upload-pack')
             result = subprocess.run(
-                ['git-upload-pack', '--stateless-rpc', self.repo_path],
+                cmd + ['--stateless-rpc', self.repo_path],
                 input=request_body,
                 capture_output=True,
                 timeout=300,  # Pack generation can take time

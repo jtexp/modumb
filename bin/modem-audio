@@ -1,16 +1,20 @@
-#!/usr/bin/env python3
-"""Modem audio device management utility."""
+#!/bin/sh
+# Modem Audio CLI
+# Cross-platform wrapper that calls the Python module
 
-import sys
-import os
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Add src to path for development
-script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.join(os.path.dirname(script_dir), 'src')
-if os.path.isdir(src_dir):
-    sys.path.insert(0, src_dir)
+# Try Windows venv first, then Unix venv, then system Python
+if [ -f "$PROJECT_DIR/.venv/Scripts/python.exe" ]; then
+    PYTHON="$PROJECT_DIR/.venv/Scripts/python.exe"
+elif [ -f "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+else
+    PYTHON="python3"
+fi
 
-from modumb.cli import main
+# Add src to PYTHONPATH for development installs
+export PYTHONPATH="$PROJECT_DIR/src:$PYTHONPATH"
 
-if __name__ == '__main__':
-    main()
+exec "$PYTHON" -m modumb.cli "$@"

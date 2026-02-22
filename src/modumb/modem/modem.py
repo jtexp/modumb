@@ -4,6 +4,7 @@ Combines AFSK modulation/demodulation with audio I/O
 to provide a simple byte-oriented interface.
 """
 
+import os
 import threading
 import time
 from typing import Optional, Callable
@@ -29,6 +30,7 @@ class Modem:
         audible: bool = False,
         input_device: Optional[int] = None,
         output_device: Optional[int] = None,
+        tx_volume: Optional[float] = None,
     ):
         """Initialize modem.
 
@@ -40,15 +42,23 @@ class Modem:
             audible: If True, play audio even in loopback mode (demo)
             input_device: Input device index (microphone)
             output_device: Output device index (speaker)
+            tx_volume: Transmit volume (0.0-1.0), default from MODEM_TX_VOLUME or 0.08
 
         Environment variables (if devices not specified):
             MODEM_INPUT_DEVICE: Input device index
             MODEM_OUTPUT_DEVICE: Output device index
             MODEM_LOOPBACK: Enable loopback mode (1/true/yes)
             MODEM_AUDIBLE: Play audio in loopback mode (1/true/yes)
+            MODEM_TX_VOLUME: Transmit volume 0.0-1.0 (default 0.08)
         """
-        self.sample_rate = sample_rate
         self.baud_rate = baud_rate
+
+        # TX volume: low default to avoid clipping on sensitive microphones
+        if tx_volume is not None:
+            self.tx_volume = tx_volume
+        else:
+            env_vol = os.environ.get('MODEM_TX_VOLUME')
+            self.tx_volume = float(env_vol) if env_vol else 0.08
 
         # Create audio interface if not provided
         if audio is None:
@@ -61,13 +71,17 @@ class Modem:
             )
         self.audio = audio
 
-        # Create modulator and demodulator
+        # Use the audio interface's actual sample rate (may differ from requested
+        # if the device doesn't support the requested rate and can't resample)
+        self.sample_rate = audio.sample_rate
+
+        # Create modulator and demodulator with the actual device sample rate
         self.modulator = AFSKModulator(
-            sample_rate=sample_rate,
+            sample_rate=self.sample_rate,
             baud_rate=baud_rate,
         )
         self.demodulator = AFSKDemodulator(
-            sample_rate=sample_rate,
+            sample_rate=self.sample_rate,
             baud_rate=baud_rate,
         )
 
@@ -94,10 +108,14 @@ class Modem:
             # Modulate data to audio samples
             samples = self.modulator.modulate(data)
 
-            # Add leading/trailing silence for audio system stabilization
-            # Longer leading silence helps with filter settling and sync
-            lead_silence = np.zeros(int(0.15 * self.sample_rate), dtype=np.float32)
-            trail_silence = np.zeros(int(0.05 * self.sample_rate), dtype=np.float32)
+            # Apply TX volume to avoid clipping
+            if self.tx_volume < 1.0:
+                samples = samples * self.tx_volume
+
+            # Leading silence lets the acoustic channel and demodulator filters settle.
+            # Trailing silence ensures the receiver detects end-of-frame silence.
+            lead_silence = np.zeros(int(0.3 * self.sample_rate), dtype=np.float32)
+            trail_silence = np.zeros(int(0.2 * self.sample_rate), dtype=np.float32)
             samples = np.concatenate([lead_silence, samples, trail_silence])
 
             # Transmit
@@ -121,8 +139,16 @@ class Modem:
             # Use larger min_samples to ensure we capture the full transmission
             # At 300 baud, 8 bytes preamble = 64 bits = 10240 samples
             # Add margin for startup delay and filter settling
+            # Measure ambient noise level from a short sample to set
+            # adaptive silence threshold (UMIK-1 measurement mics have
+            # higher noise floors than typical mics)
+            noise_sample = self.audio.receive(1024, timeout=0.1)
+            noise_rms = float(np.sqrt(np.mean(noise_sample ** 2))) if len(noise_sample) > 0 else 0.01
+            silence_threshold = max(0.01, noise_rms * 3)
+
             samples = self.audio.receive_until_silence(
                 timeout=timeout,
+                threshold=silence_threshold,
                 min_samples=10000,  # ~200ms of audio minimum
                 silence_duration=0.3,  # Shorter to respond faster
             )

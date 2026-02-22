@@ -215,11 +215,28 @@ class Frame:
         computed_crc = cls.compute_crc(content)
 
         if received_crc != computed_crc:
-            import sys
-            print(f'DEBUG FRAME: CRC mismatch: received=0x{received_crc:04x} computed=0x{computed_crc:04x} length={length}', file=sys.stderr, flush=True)
-            # Show first 50 bytes of payload for debugging
-            print(f'DEBUG FRAME: Payload start: {payload[:50].hex() if len(payload) > 50 else payload.hex()}', file=sys.stderr, flush=True)
-            return None
+            # Try 1-bit error correction: flip each bit in content+CRC
+            # and check if CRC matches. Computationally cheap for small frames.
+            frame_data = unstuffed[:5 + length + 2]
+            corrected = cls._try_correct_1bit(frame_data, 5 + length)
+            if corrected is not None:
+                content = corrected[:5 + length]
+                payload = corrected[5:5 + length]
+                frame_type, sequence, length = struct.unpack('<BHH', corrected[:5])
+            else:
+                # Try 2-bit error correction across entire frame
+                corrected = cls._try_correct_2bit(
+                    frame_data, 5 + length)
+                if corrected is not None:
+                    content = corrected[:5 + length]
+                    payload = corrected[5:5 + length]
+                    frame_type, sequence, length = struct.unpack(
+                        '<BHH', corrected[:5])
+                else:
+                    import sys
+                    print(f'DEBUG FRAME: CRC mismatch: received=0x{received_crc:04x} computed=0x{computed_crc:04x} length={length}', file=sys.stderr, flush=True)
+                    print(f'DEBUG FRAME: Payload start: {payload[:50].hex() if len(payload) > 50 else payload.hex()}', file=sys.stderr, flush=True)
+                    return None
 
         # Validate frame type
         try:
@@ -232,6 +249,62 @@ class Frame:
             sequence=sequence,
             payload=payload,
         )
+
+    @classmethod
+    def _try_correct_1bit(cls, frame_data: bytes, content_len: int) -> Optional[bytes]:
+        """Try to correct a single-bit error in frame data.
+
+        Flips each bit in the frame (content + CRC) and checks if the
+        CRC matches. Returns corrected bytes or None.
+        """
+        data = bytearray(frame_data)
+        total_bits = len(data) * 8
+        for bit_pos in range(total_bits):
+            byte_idx = bit_pos // 8
+            bit_idx = bit_pos % 8
+            # Flip the bit
+            data[byte_idx] ^= (1 << bit_idx)
+            # Check CRC
+            content = bytes(data[:content_len])
+            crc = cls.compute_crc(content)
+            received_crc = struct.unpack('<H', bytes(data[content_len:content_len + 2]))[0]
+            if crc == received_crc:
+                return bytes(data)
+            # Flip back
+            data[byte_idx] ^= (1 << bit_idx)
+        return None
+
+    @classmethod
+    def _try_correct_2bit(
+        cls, frame_data: bytes, content_len: int
+    ) -> Optional[bytes]:
+        """Try to correct a 2-bit error anywhere in the frame.
+
+        Flips every pair of bits in content+CRC and checks CRC.
+        Validates that the corrected frame type is still valid to
+        guard against false positives (probability <1% for typical
+        frame sizes with CRC-16).
+        """
+        valid_types = {0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13}
+        data = bytearray(frame_data)
+        total_bits = (content_len + 2) * 8  # content + CRC
+        for i in range(total_bits):
+            byte_i = i // 8
+            bit_i = i % 8
+            data[byte_i] ^= (1 << bit_i)
+            for j in range(i + 1, total_bits):
+                byte_j = j // 8
+                bit_j = j % 8
+                data[byte_j] ^= (1 << bit_j)
+                content = bytes(data[:content_len])
+                crc = cls.compute_crc(content)
+                received_crc = struct.unpack(
+                    '<H', bytes(data[content_len:content_len + 2]))[0]
+                if crc == received_crc and data[0] in valid_types:
+                    return bytes(data)
+                data[byte_j] ^= (1 << bit_j)
+            data[byte_i] ^= (1 << bit_i)
+        return None
 
     @classmethod
     def create_data(cls, sequence: int, data: bytes) -> "Frame":

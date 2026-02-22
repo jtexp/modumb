@@ -234,7 +234,12 @@ def test_audio(input_device: Optional[int] = None, output_device: Optional[int] 
         print(f"Testing OUTPUT (device {output_device or 'default'})...")
         print("  Playing 1000 Hz tone for 1 second...")
 
-        sample_rate = 48000
+        # Use device's native sample rate to avoid frequency shifting
+        if output_device is not None:
+            dev_info = sd.query_devices(output_device)
+            sample_rate = int(dev_info['default_samplerate'])
+        else:
+            sample_rate = 48000
         duration = 1.0
         t = np.linspace(0, duration, int(sample_rate * duration), dtype=np.float32)
         tone = 0.3 * np.sin(2 * np.pi * 1000 * t)

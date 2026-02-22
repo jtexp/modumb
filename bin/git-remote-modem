@@ -1,20 +1,20 @@
-#!/home/john/modumb/.venv/bin/python
-"""Git remote helper for modem:// URLs.
+#!/bin/sh
+# Git remote helper for modem:// URLs
+# Cross-platform wrapper that calls the Python module
 
-This script is called by git when accessing modem:// URLs.
-It must be named 'git-remote-modem' and be in PATH.
-"""
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-import sys
-import os
+# Try Windows venv first, then Unix venv, then system Python
+if [ -f "$PROJECT_DIR/.venv/Scripts/python.exe" ]; then
+    PYTHON="$PROJECT_DIR/.venv/Scripts/python.exe"
+elif [ -f "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+else
+    PYTHON="python3"
+fi
 
-# Add src to path for development
-script_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.join(os.path.dirname(script_dir), 'src')
-if os.path.isdir(src_dir):
-    sys.path.insert(0, src_dir)
+# Add src to PYTHONPATH for development installs
+export PYTHONPATH="$PROJECT_DIR/src:$PYTHONPATH"
 
-from modumb.git.remote_helper import main
-
-if __name__ == '__main__':
-    main()
+exec "$PYTHON" -m modumb.git.remote_helper "$@"
