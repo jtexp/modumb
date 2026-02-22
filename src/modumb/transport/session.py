@@ -231,13 +231,15 @@ class Session:
 class SessionManager:
     """Manages multiple sessions over a single framer."""
 
-    def __init__(self, framer: Framer):
+    def __init__(self, framer: Framer, timeout: float = None):
         """Initialize session manager.
 
         Args:
             framer: Framer for physical communication
+            timeout: ACK timeout for ReliableTransport (None = default)
         """
         self.framer = framer
+        self._timeout = timeout
         self._sessions: dict[int, Session] = {}
         self._next_id = 0
         self._lock = threading.Lock()
@@ -249,7 +251,10 @@ class SessionManager:
             New session instance
         """
         with self._lock:
-            transport = ReliableTransport(self.framer)
+            kwargs = {}
+            if self._timeout is not None:
+                kwargs['timeout'] = self._timeout
+            transport = ReliableTransport(self.framer, **kwargs)
             session = Session(transport)
 
             session_id = self._next_id

@@ -13,7 +13,7 @@ from typing import Optional
 
 from ..http.client import HttpClient, HttpResponse
 from ..transport.session import SessionManager, Session
-from ..transport.reliable import ReliableTransport
+from ..transport.reliable import ReliableTransport, timeout_for_baud
 from ..datalink.framer import Framer
 from ..modem.modem import Modem
 from ..modem.profiles import get_profile, AudioProfile
@@ -47,6 +47,7 @@ class LocalProxy:
             audible=self.config.audible,
             input_device=self.config.input_device,
             output_device=self.config.output_device,
+            baud_rate=self.config.baud_rate,
             profile=profile,
         )
 
@@ -64,10 +65,11 @@ class LocalProxy:
         self._modem = self._create_modem()
         self._modem.start()
 
-        self._framer = Framer(self._modem)
+        ack_timeout = timeout_for_baud(self._modem.baud_rate)
+        self._framer = Framer(self._modem, frame_timeout=ack_timeout)
         self._framer.start()
 
-        self._session_mgr = SessionManager(self._framer)
+        self._session_mgr = SessionManager(self._framer, timeout=ack_timeout)
         self._session = self._session_mgr.create_client_session()
 
         if self._session is None:
@@ -173,6 +175,7 @@ class LocalProxy:
         print(f"Proxy listening on {self.config.listen_host}:{self.config.listen_port}",
               file=sys.stderr, flush=True)
         print(f"  Mode: {self.config.mode}", file=sys.stderr, flush=True)
+        print(f"  Baud rate: {self.config.baud_rate}", file=sys.stderr, flush=True)
         print(f"  Usage: curl --proxy http://{self.config.listen_host}:{self.config.listen_port}"
               f" http://example.com", file=sys.stderr, flush=True)
 
@@ -210,6 +213,8 @@ def main():
                         help="Proxy listen port (default: 8080)")
     parser.add_argument("--audible", action="store_true",
                         help="Play audio even in loopback mode")
+    parser.add_argument("--baud-rate", type=int, default=300,
+                        help="Modem baud rate (default: 300)")
     parser.add_argument("-i", "--input-device", type=int, metavar="N",
                         help="Input device index")
     parser.add_argument("-o", "--output-device", type=int, metavar="N",
@@ -220,6 +225,7 @@ def main():
         listen_host=args.host,
         listen_port=args.port,
         mode=args.mode or "acoustic",
+        baud_rate=args.baud_rate,
         input_device=args.input_device,
         output_device=args.output_device,
         audible=args.audible,

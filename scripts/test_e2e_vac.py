@@ -118,14 +118,20 @@ def run_test(test_url, expected_content, timeout, proxy_host, proxy_port):
 
 
 def main():
-    # Parse optional test name from argv
-    test_name = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TEST
-    if test_name not in TESTS:
-        print(f'Unknown test: {test_name}. Available: {", ".join(TESTS)}', flush=True)
-        return 1
+    import argparse
+
+    parser = argparse.ArgumentParser(description='E2E proxy test through Virtual Audio Cables')
+    parser.add_argument('test', nargs='?', default=DEFAULT_TEST,
+                        choices=list(TESTS.keys()), help='Test case to run')
+    parser.add_argument('--baud-rate', type=int, default=300,
+                        help='Modem baud rate (default: 300)')
+    args = parser.parse_args()
+
+    test_name = args.test
+    baud_rate = args.baud_rate
 
     test_url, expected_content, timeout = TESTS[test_name]
-    print(f'=== E2E Proxy Test: {test_name} ({test_url}) ===', flush=True)
+    print(f'=== E2E Proxy Test: {test_name} ({test_url}) baud={baud_rate} ===', flush=True)
 
     relay_proc = None
     proxy_proc = None
@@ -138,6 +144,7 @@ def main():
         relay_cmd = [
             PY, '-m', 'modumb.proxy.remote_proxy',
             '--mode', MODE,
+            '--baud-rate', str(baud_rate),
             '-o', str(VAC2_OUTPUT),
             '-i', str(VAC1_INPUT),
         ]
@@ -157,6 +164,7 @@ def main():
         proxy_cmd = [
             PY, '-m', 'modumb.proxy.local_proxy',
             '--mode', MODE,
+            '--baud-rate', str(baud_rate),
             '-o', str(VAC1_OUTPUT),
             '-i', str(VAC2_INPUT),
             '--port', str(PROXY_PORT),

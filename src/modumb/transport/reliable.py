@@ -33,6 +33,16 @@ class TransportStats:
     nak_received: int = 0
 
 
+def timeout_for_baud(baud_rate: int) -> float:
+    """Compute ACK timeout based on baud rate.
+
+    Max frame: (16+2+5+64+2) * 8 bits = 712 bits.
+    Plus ~0.3s for silence/turnaround.
+    """
+    max_frame_time = 712 / baud_rate + 0.3
+    return max(2.0, max_frame_time * 2.5)
+
+
 class ReliableTransport:
     """Reliable transport using Stop-and-Wait ARQ."""
 

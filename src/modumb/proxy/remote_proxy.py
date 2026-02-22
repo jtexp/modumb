@@ -149,6 +149,7 @@ class RemoteRelay:
             audible=self.config.audible,
             input_device=self.config.input_device,
             output_device=self.config.output_device,
+            baud_rate=self.config.baud_rate,
             profile=profile,
         )
 
@@ -158,7 +159,8 @@ class RemoteRelay:
         handler = create_relay_handler(self.config)
         self._server = HttpServer(modem, handler=handler)
 
-        print(f"Modem relay starting (mode={self.config.mode})", file=sys.stderr, flush=True)
+        print(f"Modem relay starting (mode={self.config.mode}, baud={self.config.baud_rate})",
+              file=sys.stderr, flush=True)
         print("Waiting for modem connections...", file=sys.stderr, flush=True)
 
         self._server.serve_forever()
@@ -184,6 +186,8 @@ def main():
     )
     parser.add_argument("--audible", action="store_true",
                         help="Play audio even in loopback mode")
+    parser.add_argument("--baud-rate", type=int, default=300,
+                        help="Modem baud rate (default: 300)")
     parser.add_argument("-i", "--input-device", type=int, metavar="N",
                         help="Input device index")
     parser.add_argument("-o", "--output-device", type=int, metavar="N",
@@ -196,6 +200,7 @@ def main():
 
     config = ProxyConfig(
         mode=args.mode or "acoustic",
+        baud_rate=args.baud_rate,
         input_device=args.input_device,
         output_device=args.output_device,
         audible=args.audible,

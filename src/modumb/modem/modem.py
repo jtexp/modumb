@@ -56,7 +56,16 @@ class Modem:
             MODEM_AUDIBLE: Play audio in loopback mode (1/true/yes)
             MODEM_TX_VOLUME: Transmit volume 0.0-1.0
         """
-        self.baud_rate = baud_rate
+        # Baud rate priority: explicit arg > env var > default
+        env_baud = os.environ.get('MODEM_BAUD_RATE')
+        if baud_rate != BAUD_RATE:
+            # Explicit non-default arg takes priority
+            self.baud_rate = baud_rate
+        elif env_baud:
+            self.baud_rate = int(env_baud)
+        else:
+            self.baud_rate = baud_rate
+        baud_rate = self.baud_rate
         self.profile = profile
 
         # TX volume priority: explicit arg > env var > profile > default
@@ -169,7 +178,7 @@ class Modem:
                 timeout=timeout,
                 threshold=silence_threshold,
                 min_samples=10000,  # ~200ms of audio minimum
-                silence_duration=0.3,  # Shorter to respond faster
+                silence_duration=max(0.1, 0.3 * 300 / self.baud_rate),
             )
 
             if len(samples) == 0:

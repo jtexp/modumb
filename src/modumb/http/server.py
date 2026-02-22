@@ -9,7 +9,7 @@ from typing import Optional, Dict, Callable, Tuple
 from dataclasses import dataclass
 
 from ..transport.session import Session, SessionManager
-from ..transport.reliable import ReliableTransport
+from ..transport.reliable import ReliableTransport, timeout_for_baud
 from ..datalink.framer import Framer
 from ..modem.modem import Modem
 
@@ -174,10 +174,11 @@ class HttpServer:
         if not self.modem.is_running:
             self.modem.start()
 
-        self._framer = Framer(self.modem)
+        ack_timeout = timeout_for_baud(self.modem.baud_rate)
+        self._framer = Framer(self.modem, frame_timeout=ack_timeout)
         self._framer.start()
 
-        self._session_manager = SessionManager(self._framer)
+        self._session_manager = SessionManager(self._framer, timeout=ack_timeout)
         self._running = True
 
     def stop(self) -> None:
