@@ -5,15 +5,19 @@ via urllib, and returns the response back over modem.
 """
 
 import os
+import select
+import socket
 import sys
 import urllib.request
 import urllib.error
-from typing import Optional
+from typing import Optional, Callable
 
-from ..http.server import HttpServer, HttpServerRequest, HttpServerResponse, RequestHandler
+from ..http.server import HttpServer, HttpServerRequest, HttpServerResponse, RequestHandler, ConnectHandler
+from ..transport.session import Session
 from ..modem.modem import Modem
 from ..modem.profiles import get_profile, AudioProfile
 from .config import ProxyConfig
+from .tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK
 
 
 # Hop-by-hop headers that must not be forwarded (RFC 2616 §13.5.1)
@@ -49,13 +53,23 @@ def create_relay_handler(config: ProxyConfig) -> RequestHandler:
                 )
             url = f"http://{host}{request.path}"
 
-        # CONNECT method (HTTPS tunneling) — not yet supported
+        # CONNECT method (HTTPS tunneling)
         if request.method == "CONNECT":
+            # Parse host:port for allowed_hosts check
+            target = request.path
+            host = target.split(':')[0] if ':' in target else target
+            if config.allowed_hosts is not None and host not in config.allowed_hosts:
+                return HttpServerResponse(
+                    status_code=403,
+                    status_message="Forbidden",
+                    headers={"Content-Type": "text/plain"},
+                    body=f"Host not allowed: {host}".encode(),
+                )
             return HttpServerResponse(
-                status_code=501,
-                status_message="Not Implemented",
-                headers={"Content-Type": "text/plain"},
-                body=b"HTTPS CONNECT tunneling not yet supported (Phase 2)",
+                status_code=200,
+                status_message="Connection Established",
+                headers={},
+                body=b"",
             )
 
         # Check allowed hosts
@@ -134,6 +148,97 @@ def create_relay_handler(config: ProxyConfig) -> RequestHandler:
     return handler
 
 
+def create_connect_handler(config: ProxyConfig) -> ConnectHandler:
+    """Create a CONNECT tunnel handler.
+
+    Returns a function (session, target) -> None that:
+    1. Opens TCP to upstream host:port
+    2. Loops: receive_chunk from modem -> sendall to TCP -> recv from TCP -> send_chunk back
+    3. Closes TCP on error/close signal
+    """
+
+    def handler(session: Session, target: str) -> None:
+        # Parse host:port
+        if ':' in target:
+            host, port_str = target.rsplit(':', 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 443
+        else:
+            host = target
+            port = 443
+
+        print(f"RELAY CONNECT: Opening TCP to {host}:{port}", file=sys.stderr, flush=True)
+
+        try:
+            upstream = socket.create_connection((host, port), timeout=10)
+        except Exception as e:
+            print(f"RELAY CONNECT: TCP connect failed: {e}", file=sys.stderr, flush=True)
+            # Send close signal so proxy knows tunnel failed
+            send_close(session)
+            return
+
+        try:
+            upstream.setblocking(False)
+            initial_timeout = 2.0
+            subsequent_timeout = 0.2
+
+            while True:
+                # Receive client data from modem
+                client_data = receive_chunk(session, timeout=30.0)
+                if client_data is None:
+                    print("RELAY CONNECT: Modem receive timeout/error",
+                          file=sys.stderr, flush=True)
+                    break
+                if client_data == b'':
+                    print("RELAY CONNECT: Client sent close signal",
+                          file=sys.stderr, flush=True)
+                    break
+
+                # Forward to upstream TCP
+                try:
+                    upstream.sendall(client_data)
+                except Exception as e:
+                    print(f"RELAY CONNECT: TCP send error: {e}",
+                          file=sys.stderr, flush=True)
+                    break
+
+                # Read response from upstream (non-blocking with select)
+                server_data = bytearray()
+                read_timeout = initial_timeout
+                while True:
+                    ready, _, _ = select.select([upstream], [], [], read_timeout)
+                    if not ready:
+                        break
+                    try:
+                        chunk = upstream.recv(MAX_TUNNEL_CHUNK)
+                    except (BlockingIOError, ConnectionError):
+                        break
+                    if not chunk:
+                        # TCP closed by upstream
+                        break
+                    server_data.extend(chunk)
+                    read_timeout = subsequent_timeout
+
+                # Send server response back over modem
+                if not send_chunk(session, bytes(server_data)):
+                    print("RELAY CONNECT: Modem send failed",
+                          file=sys.stderr, flush=True)
+                    break
+
+                # If upstream TCP closed (recv returned empty), we're done
+                if ready and not chunk:
+                    send_close(session)
+                    break
+
+        finally:
+            upstream.close()
+            print("RELAY CONNECT: Tunnel closed", file=sys.stderr, flush=True)
+
+    return handler
+
+
 class RemoteRelay:
     """Remote relay server — receives requests over modem, fetches from internet."""
 
@@ -160,8 +265,10 @@ class RemoteRelay:
         """Start the relay (blocking)."""
         modem = self._create_modem()
         handler = create_relay_handler(self.config)
+        connect_handler = create_connect_handler(self.config)
         full_duplex = self.config.duplex == "full"
-        self._server = HttpServer(modem, handler=handler, full_duplex=full_duplex)
+        self._server = HttpServer(modem, handler=handler, full_duplex=full_duplex,
+                                  connect_handler=connect_handler)
 
         print(f"Modem relay starting (mode={self.config.mode}, baud={self.config.baud_rate}, duplex={self.config.duplex})",
               file=sys.stderr, flush=True)

@@ -46,6 +46,7 @@ MODE = 'cable'
 TESTS = {
     'small': ('http://example.com', 'Example Domain', 120),
     'medium': ('http://info.cern.ch', 'http://info.cern.ch', 300),
+    'https': ('https://example.com', 'Example Domain', 300),
 }
 DEFAULT_TEST = 'small'
 
@@ -85,9 +86,11 @@ def run_test(test_url, expected_content, timeout, proxy_host, proxy_port):
     print(f'\nSending GET {test_url} through proxy...', flush=True)
     request_start = time.time()
 
-    proxy_handler = urllib.request.ProxyHandler({
-        'http': f'http://{proxy_host}:{proxy_port}',
-    })
+    proxy_url = f'http://{proxy_host}:{proxy_port}'
+    proxy_dict = {'http': proxy_url}
+    if test_url.startswith('https://'):
+        proxy_dict['https'] = proxy_url
+    proxy_handler = urllib.request.ProxyHandler(proxy_dict)
     opener = urllib.request.build_opener(proxy_handler)
 
     try:

@@ -154,9 +154,11 @@ Cable/VAC tests default to full-duplex. Use `--duplex half` to test half-duplex.
 | 5 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300` | faster than #1 |
 | 6 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200` | ~27s, ~20 B/s |
 | 7 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200` | faster than #4 |
+| 8 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200 --duplex half` | TLS handshake + response, ~60-90s |
+| 9 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200` | Faster than #8 (full-duplex) |
 
-All tests must pass with zero retransmissions. If short on time, tests 2, 6 are the
-minimum (1200 baud half-duplex + full-duplex).
+All tests must pass with zero retransmissions. If short on time, tests 2, 6, 8 are the
+minimum (HTTP half-duplex, HTTP full-duplex, HTTPS half-duplex — all at 1200 baud).
 
 ## Session Close Protocol
 
@@ -172,9 +174,11 @@ $PY -m pytest tests/ -v
 # 2. VAC e2e smoke tests (if any modem/datalink/transport/HTTP/proxy code changed)
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex half
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200 --duplex half
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200
 ```
 
-Both must pass before committing. If only docs/tests/config changed, skip e2e.
+All must pass before committing. If only docs/tests/config changed, skip e2e.
 
 ## Issue Tracking
 

@@ -5,6 +5,7 @@ over the modem session to the remote relay, returns the response.
 """
 
 import os
+import select
 import sys
 import threading
 import io
@@ -19,6 +20,7 @@ from ..datalink.framer import Framer
 from ..modem.modem import Modem
 from ..modem.profiles import get_profile, AudioProfile
 from .config import ProxyConfig
+from .tunnel import send_chunk, receive_chunk, send_close, MAX_TUNNEL_CHUNK
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -154,8 +156,94 @@ class LocalProxy:
                 self.wfile.write(response.body)
 
             def do_CONNECT(self):
-                """HTTPS tunneling — not yet supported."""
-                self.send_error(501, "HTTPS CONNECT not implemented (Phase 2)")
+                """HTTPS CONNECT tunneling."""
+                target = self.path  # host:port
+                print(f"PROXY CONNECT: {target}", file=sys.stderr, flush=True)
+
+                with proxy._modem_lock:
+                    if not proxy._ensure_session():
+                        self.send_error(502, "Modem relay unreachable")
+                        return
+
+                    # Send CONNECT as HTTP request to relay
+                    response = proxy._http_client.request(
+                        method="CONNECT",
+                        path=target,
+                        timeout=proxy.config.request_timeout,
+                    )
+
+                    if response is None or response.status_code != 200:
+                        code = response.status_code if response else 502
+                        msg = response.status_message if response else "Modem relay unreachable"
+                        self.send_error(code, msg)
+                        return
+
+                    # Tell browser the tunnel is established
+                    self.send_response(200, "Connection Established")
+                    self.end_headers()
+                    self.wfile.flush()
+
+                    # Switch browser socket to non-blocking for select
+                    browser_sock = self.connection
+                    browser_sock.setblocking(False)
+
+                    session = proxy._http_client.session
+
+                    try:
+                        while True:
+                            # Wait for browser data
+                            ready, _, _ = select.select([browser_sock], [], [], 5.0)
+                            if not ready:
+                                # Keepalive: send empty data, get relay response
+                                send_chunk(session, b'')
+                                server_data = receive_chunk(session, timeout=30.0)
+                                if server_data is None:
+                                    break
+                                if server_data == b'':
+                                    break
+                                if server_data:
+                                    browser_sock.sendall(server_data)
+                                continue
+
+                            try:
+                                client_data = browser_sock.recv(MAX_TUNNEL_CHUNK)
+                            except (BlockingIOError, ConnectionError):
+                                client_data = b''
+
+                            if not client_data:
+                                # Browser closed
+                                send_close(session)
+                                break
+
+                            # Send browser data to relay
+                            if not send_chunk(session, client_data):
+                                break
+
+                            # Receive relay response
+                            server_data = receive_chunk(session, timeout=30.0)
+                            if server_data is None:
+                                break
+                            if server_data == b'':
+                                break
+
+                            # Forward to browser
+                            if server_data:
+                                try:
+                                    browser_sock.sendall(server_data)
+                                except (BrokenPipeError, ConnectionError):
+                                    send_close(session)
+                                    break
+                    except Exception as e:
+                        print(f"PROXY CONNECT: Tunnel error: {e}",
+                              file=sys.stderr, flush=True)
+                        try:
+                            send_close(session)
+                        except Exception:
+                            pass
+                    finally:
+                        browser_sock.setblocking(True)
+                        print("PROXY CONNECT: Tunnel closed",
+                              file=sys.stderr, flush=True)
 
             # Map all standard methods to the generic proxy handler
             do_GET = _do_proxy

@@ -1,11 +1,12 @@
 """Tests for proxy module."""
 
+import struct
 import pytest
 from unittest.mock import patch, MagicMock
 import urllib.error
 
 from modumb.proxy.config import ProxyConfig
-from modumb.proxy.remote_proxy import create_relay_handler, HOP_BY_HOP
+from modumb.proxy.remote_proxy import create_relay_handler, create_connect_handler, HOP_BY_HOP
 from modumb.http.server import HttpServerRequest, HttpServerResponse
 
 
@@ -41,12 +42,27 @@ class TestRelayHandler:
             body=body,
         )
 
-    def test_connect_returns_501(self):
+    def test_connect_returns_200(self):
         config = ProxyConfig()
         handler = create_relay_handler(config)
         req = self._make_request(method="CONNECT", path="example.com:443")
         resp = handler(req)
-        assert resp.status_code == 501
+        assert resp.status_code == 200
+        assert resp.body == b""
+
+    def test_connect_checks_allowed_hosts(self):
+        config = ProxyConfig(allowed_hosts=["allowed.com"])
+        handler = create_relay_handler(config)
+        req = self._make_request(method="CONNECT", path="blocked.com:443")
+        resp = handler(req)
+        assert resp.status_code == 403
+
+    def test_connect_allows_permitted_host(self):
+        config = ProxyConfig(allowed_hosts=["example.com"])
+        handler = create_relay_handler(config)
+        req = self._make_request(method="CONNECT", path="example.com:443")
+        resp = handler(req)
+        assert resp.status_code == 200
 
     def test_allowed_hosts_blocks(self):
         config = ProxyConfig(allowed_hosts=["allowed.com"])
@@ -160,6 +176,52 @@ class TestRelayHandler:
         # Verify hop-by-hop headers stripped from response
         for h in resp.headers:
             assert h.lower() not in HOP_BY_HOP
+
+
+class TestConnectHandler:
+    """Test create_connect_handler."""
+
+    def test_opens_tcp_to_correct_host_port(self):
+        config = ProxyConfig()
+        handler = create_connect_handler(config)
+        session = MagicMock()
+        # Close signal immediately so handler exits after connecting
+        close_chunk = struct.pack('<I', 0)
+        session.receive = MagicMock(return_value=close_chunk)
+
+        with patch("modumb.proxy.remote_proxy.socket.create_connection") as mock_conn:
+            mock_sock = MagicMock()
+            mock_conn.return_value = mock_sock
+            handler(session, "example.com:8443")
+            mock_conn.assert_called_once_with(("example.com", 8443), timeout=10)
+            mock_sock.close.assert_called_once()
+
+    def test_defaults_to_port_443(self):
+        config = ProxyConfig()
+        handler = create_connect_handler(config)
+        session = MagicMock()
+        close_chunk = struct.pack('<I', 0)
+        session.receive = MagicMock(return_value=close_chunk)
+
+        with patch("modumb.proxy.remote_proxy.socket.create_connection") as mock_conn:
+            mock_sock = MagicMock()
+            mock_conn.return_value = mock_sock
+            handler(session, "example.com")
+            mock_conn.assert_called_once_with(("example.com", 443), timeout=10)
+
+    def test_sends_close_on_upstream_connect_failure(self):
+        config = ProxyConfig()
+        handler = create_connect_handler(config)
+        session = MagicMock()
+        session.send = MagicMock(return_value=True)
+
+        with patch("modumb.proxy.remote_proxy.socket.create_connection",
+                    side_effect=ConnectionRefusedError("refused")):
+            handler(session, "example.com:443")
+        # Should have sent a close signal (4 zero bytes)
+        session.send.assert_called_once()
+        sent = session.send.call_args[0][0]
+        assert sent == struct.pack('<I', 0)
 
 
 class TestHopByHop:

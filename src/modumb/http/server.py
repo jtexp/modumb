@@ -13,6 +13,9 @@ from ..transport.reliable import ReliableTransport, timeout_for_baud
 from ..datalink.framer import Framer
 from ..modem.modem import Modem
 
+# Type for CONNECT handler: receives (session, target_host_port)
+ConnectHandler = Callable[[Session, str], None]
+
 
 @dataclass
 class HttpServerRequest:
@@ -147,6 +150,7 @@ class HttpServer:
         modem: Modem,
         handler: Optional[RequestHandler] = None,
         full_duplex: bool = False,
+        connect_handler: Optional[ConnectHandler] = None,
     ):
         """Initialize HTTP server.
 
@@ -154,10 +158,12 @@ class HttpServer:
             modem: Modem for communication
             handler: Request handler function
             full_duplex: If True, skip half-duplex delays throughout stack
+            connect_handler: Handler for CONNECT tunneling
         """
         self.modem = modem
         self.handler = handler or self._default_handler
         self._full_duplex = full_duplex
+        self.connect_handler = connect_handler
 
         self._framer: Optional[Framer] = None
         self._session_manager: Optional[SessionManager] = None
@@ -277,6 +283,17 @@ class HttpServer:
             # Send response
             response_bytes = response.encode()
             if not session.send(response_bytes):
+                break
+
+            # CONNECT tunnel: after sending 200, hand off to connect_handler
+            if (request and request.method == 'CONNECT'
+                    and response.status_code == 200
+                    and self.connect_handler):
+                try:
+                    self.connect_handler(session, request.path)
+                except Exception as e:
+                    print(f'DEBUG SERVER: connect_handler error: {e}',
+                          file=sys.stderr, flush=True)
                 break
 
             # Check for Connection: close
