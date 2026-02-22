@@ -593,17 +593,25 @@ class AFSKDemodulator:
                     best_score = score
                     best_offset = offset
 
-        # Try both envelope (fast, handles most cases) and DFT (stateless,
-        # no ISI) demodulation.  Return whichever scores better on preamble.
+        # Try three demodulation strategies and return the best-scoring one:
+        # 1. Envelope with clock recovery (handles analog clock drift)
+        # 2. DFT with clock recovery (stateless bit decisions, no ISI)
+        # 3. Simple DFT with fixed stride (best for digital cables with
+        #    zero clock drift, where clock recovery can introduce errors)
         env_result = self._demodulate_envelope_recovered(
             mark_env, space_env, best_offset)
         dft_result = self._demodulate_dft_recovered(
             samples, mark_env, space_env, best_offset)
+        dft_simple = self._demodulate_dft(samples, best_offset)
 
-        env_score = self._score_alignment(env_result)
-        dft_score = self._score_alignment(dft_result)
+        candidates = [
+            (env_result, self._score_alignment(env_result)),
+            (dft_result, self._score_alignment(dft_result)),
+            (dft_simple, self._score_alignment(dft_simple)),
+        ]
+        candidates.sort(key=lambda x: x[1], reverse=True)
 
-        return dft_result if dft_score > env_score else env_result
+        return candidates[0][0]
 
     def _demodulate_raw(self, samples: np.ndarray) -> bytes:
         """Demodulate without sync detection."""

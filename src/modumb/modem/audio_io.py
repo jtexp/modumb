@@ -155,13 +155,41 @@ class AudioInterface:
         self._hdmi_wake_enabled: bool = hdmi_wake_enabled if hdmi_wake_enabled is not None else self._detect_hdmi_device()
 
     def _detect_native_sample_rate(self) -> int:
-        """Detect the native sample rate of the output device.
+        """Detect the best sample rate for our devices.
 
         Some audio devices (especially HDMI monitors) don't resample,
         so playing at a non-native rate shifts all frequencies. We detect
         the native rate and use it to avoid this issue.
+
+        However, if the device supports our preferred rate (48000 Hz),
+        we keep it — the AFSK demodulator was designed for 48000 Hz and
+        works better there (160 samples/bit vs 147 at 44100).  Virtual
+        audio cables (VB-Cable, Virtual Audio Cable) report 44100 as
+        default but handle 48000 perfectly.
         """
-        native_rate = self.sample_rate
+        preferred_rate = self.sample_rate  # typically 48000
+
+        # Check if both output and input devices support our preferred rate
+        try:
+            if self.output_device is not None:
+                sd.check_output_settings(
+                    device=self.output_device,
+                    samplerate=preferred_rate,
+                    channels=self.channels,
+                )
+            if self.input_device is not None:
+                sd.check_input_settings(
+                    device=self.input_device,
+                    samplerate=preferred_rate,
+                    channels=self.channels,
+                )
+            # Both devices support preferred rate — keep it
+            return preferred_rate
+        except Exception:
+            pass
+
+        # Preferred rate not supported — fall back to output device native rate
+        native_rate = preferred_rate
         try:
             if self.output_device is not None:
                 dev_info = sd.query_devices(self.output_device)
@@ -169,9 +197,9 @@ class AudioInterface:
         except Exception:
             pass
 
-        if native_rate != self.sample_rate:
+        if native_rate != preferred_rate:
             print(f"DEBUG AUDIO: Output device native rate is {native_rate} Hz, "
-                  f"adjusting from {self.sample_rate} Hz",
+                  f"adjusting from {preferred_rate} Hz",
                   file=sys.stderr, flush=True)
 
         return native_rate
@@ -216,8 +244,11 @@ class AudioInterface:
             wake_tone = wake_tone.astype(np.float32)
 
             # Play and wait
-            sd.play(wake_tone, self.sample_rate, device=self.output_device)
-            sd.wait()
+            if self._output_stream is not None:
+                self._output_stream.write(wake_tone.reshape(-1, 1))
+            else:
+                sd.play(wake_tone, self.sample_rate, device=self.output_device)
+                sd.wait()
 
             # Small delay to let the device stabilize
             time.sleep(0.1)
@@ -243,7 +274,6 @@ class AudioInterface:
                 return
 
             # Create input stream for receiving
-            # (transmit uses sd.play directly for better compatibility)
             self._input_stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
@@ -253,7 +283,18 @@ class AudioInterface:
                 callback=self._input_callback,
             )
 
+            # Create output stream for transmitting
+            # (per-device stream avoids global sd.play() state conflicts
+            #  when multiple modem instances run simultaneously)
+            self._output_stream = sd.OutputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                device=self.output_device,
+                dtype=np.float32,
+            )
+
             self._input_stream.start()
+            self._output_stream.start()
             self._running = True
 
     def stop(self) -> None:
@@ -266,8 +307,10 @@ class AudioInterface:
                 self._input_stream.close()
                 self._input_stream = None
 
-            # Note: output uses sd.play() directly, no persistent stream
-            self._output_stream = None
+            if self._output_stream:
+                self._output_stream.stop()
+                self._output_stream.close()
+                self._output_stream = None
 
     def _input_callback(
         self,
@@ -349,11 +392,9 @@ class AudioInterface:
         self._transmitting = True
         self.clear_receive_buffer()
 
-        # Use direct playback for reliable transmission
-        # (callback-based output doesn't work well with some audio backends)
-        sd.play(samples_f32, self.sample_rate, device=self.output_device)
-        if blocking:
-            sd.wait()
+        # Write to per-device output stream (avoids global sd.play() state
+        # conflicts when multiple modem instances run simultaneously)
+        self._output_stream.write(samples_f32.reshape(-1, 1))
 
         # Echo suppression: record end time, clear any echo that snuck through
         self._transmitting = False
@@ -426,6 +467,8 @@ class AudioInterface:
         silence_samples = int(silence_duration * self.sample_rate)
         deadline = time.time() + timeout
         signal_detected = False
+        consecutive_signal = 0
+        signal_start_idx = 0  # index in samples[] where signal was confirmed
 
         while time.time() < deadline:
             block = self.receive(self.blocksize, timeout=0.1)
@@ -436,24 +479,35 @@ class AudioInterface:
             collected += len(block)
 
             # Check for signal presence (RMS above threshold)
+            # Require 3 consecutive blocks (~64ms) to filter cable glitches
             block_rms = np.sqrt(np.mean(block ** 2))
-            if block_rms > threshold * 2:  # Signal is present
-                signal_detected = True
+            if block_rms > threshold * 2:
+                consecutive_signal += 1
+                if not signal_detected and consecutive_signal >= 3:
+                    signal_detected = True
+                    # Keep 2 blocks before confirmation for filter settling
+                    signal_start_idx = max(0, len(samples) - consecutive_signal - 2)
+            else:
+                if not signal_detected:
+                    consecutive_signal = 0
 
             # Only check for silence AFTER we've detected signal
             if signal_detected and collected >= min_samples:
-                # Need enough samples to check for silence_duration
-                # Each block is blocksize (1024) samples, so we need at least
-                # silence_samples / blocksize blocks
                 blocks_needed = max(10, (silence_samples // self.blocksize) + 1)
                 recent = np.concatenate(samples[-blocks_needed:]) if len(samples) >= blocks_needed else np.concatenate(samples)
-                # Only check if we have enough samples for the silence duration
                 if len(recent) >= silence_samples:
                     rms = np.sqrt(np.mean(recent[-silence_samples:] ** 2))
                     if rms < threshold:
                         break
 
-        return np.concatenate(samples) if samples else np.zeros(0, dtype=np.float32)
+        if not samples:
+            return np.zeros(0, dtype=np.float32)
+
+        # Discard pre-signal silence to avoid feeding garbage to demodulator
+        if signal_detected and signal_start_idx > 0:
+            samples = samples[signal_start_idx:]
+
+        return np.concatenate(samples)
 
     @property
     def is_running(self) -> bool:

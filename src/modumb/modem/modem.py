@@ -154,10 +154,10 @@ class Modem:
             Received bytes, or empty bytes on timeout
         """
         with self._lock:
-            # Receive audio samples
-            # Use larger min_samples to ensure we capture the full transmission
-            # At 300 baud, 8 bytes preamble = 64 bits = 10240 samples
-            # Add margin for startup delay and filter settling
+            # Drain any stale audio that accumulated in the receive queue
+            # while we weren't actively listening.
+            self.audio.clear_receive_buffer()
+
             # Measure ambient noise level from a short sample to set
             # adaptive silence threshold (UMIK-1 measurement mics have
             # higher noise floors than typical mics)
@@ -175,10 +175,45 @@ class Modem:
             if len(samples) == 0:
                 return b''
 
+            # Trim leading silence before demodulation.
+            # receive_until_silence() collects all audio blocks including
+            # pre-signal silence, which dilutes the demodulator's RMS
+            # normalization and can misguide clock recovery.
+            samples = self._trim_leading_silence(samples)
+
             # Demodulate to bytes
             data = self.demodulator.demodulate(samples)
 
             return data
+
+    def _trim_leading_silence(self, samples: np.ndarray) -> np.ndarray:
+        """Trim leading silence, keeping margin before signal for filter settling.
+
+        receive_until_silence() often returns seconds of silence before
+        the actual AFSK signal. This silence degrades the demodulator's
+        RMS normalization (used to equalize mark/space frequency response)
+        and pollutes clock recovery envelope crossings.
+        """
+        spb = self.demodulator.samples_per_bit
+        if len(samples) < spb * 16:
+            return samples  # Too short to trim
+
+        abs_samples = np.abs(samples)
+        max_amp = float(np.max(abs_samples))
+        if max_amp < 0.005:
+            return samples  # No signal detected
+
+        # Find first sample above 10% of max amplitude
+        threshold = max_amp * 0.1
+        above = np.where(abs_samples > threshold)[0]
+        if len(above) == 0:
+            return samples
+
+        # Keep margin before signal start for bandpass filter settling
+        margin = spb * 8  # 8 bit periods
+        start = max(0, int(above[0]) - margin)
+
+        return samples[start:]
 
     def receive_bytes(self, num_bytes: int, timeout: float = 5.0) -> bytes:
         """Receive a specific number of bytes.
