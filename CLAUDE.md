@@ -129,13 +129,6 @@ Device indices may vary by system -- use `modem-audio devices` to discover them.
 ### Test scripts
 
 ```bash
-# E2e proxy test (small = example.com, medium = info.cern.ch)
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium
-
-# E2e at 1200 baud
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
-
 # Modem-to-modem frame exchange diagnostic
 $PY "C:/Users/John/modumb/scripts/diag_modem_exchange.py"
 
@@ -143,18 +136,21 @@ $PY "C:/Users/John/modumb/scripts/diag_modem_exchange.py"
 $PY "C:/Users/John/modumb/scripts/diag_vac_frame.py"
 ```
 
-### When to run VAC e2e tests
+### VAC e2e test matrix
 
 **After any change to modem, datalink, transport, HTTP, or proxy layers**, run the
-VAC e2e tests if Virtual Audio Cable devices are available on the machine. At minimum:
+full test matrix if Virtual Audio Cable devices are available. Unit tests alone do
+not catch audio timing, clock drift, or real-device I/O regressions.
 
-```bash
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
-```
+| # | Command | Expected |
+|---|---------|----------|
+| 1 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300` | ~73s, ~7 B/s |
+| 2 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200` | ~30s, ~18 B/s |
+| 3 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 300` | ~78s, ~8 B/s |
+| 4 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200` | ~33s, ~20 B/s |
 
-Both baud rates must pass. Unit tests alone do not catch audio timing, clock drift,
-or real-device I/O regressions that only surface over actual (virtual) audio cables.
+All 4 must pass with zero retransmissions. If short on time, tests 1 and 2 are the
+minimum (both baud rates, small payload).
 
 ## Issue Tracking
 
