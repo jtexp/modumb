@@ -13,7 +13,7 @@ Machine A (no internet)                    Machine B (has internet)
     modem-proxy                              modem-relay
 ```
 
-Machine A has no internet but has a sound card. Machine B has internet. Connect them with a 3.5mm audio cable (or just point speakers at microphones). Data flows as AFSK tones at 300 baud.
+Machine A has no internet but has a sound card. Machine B has internet. Connect them with a 3.5mm audio cable (or just point speakers at microphones). Data flows as AFSK tones at 300 baud (default) or 1200 baud.
 
 ## Quick Start
 
@@ -47,12 +47,12 @@ curl --proxy http://localhost:8080 http://example.com
 
 **Machine B** (has internet):
 ```bash
-modem-relay --mode cable -i <mic_device> -o <speaker_device>
+modem-relay --mode cable --baud-rate 1200 -i <mic_device> -o <speaker_device>
 ```
 
 **Machine A** (no internet):
 ```bash
-modem-proxy --mode cable -i <mic_device> -o <speaker_device>
+modem-proxy --mode cable --baud-rate 1200 -i <mic_device> -o <speaker_device>
 curl --proxy http://localhost:8080 http://example.com
 ```
 
@@ -103,7 +103,7 @@ Browser sends `GET http://example.com/path` to the local proxy on `localhost:808
 
 | Layer | Module | Role |
 |-------|--------|------|
-| Physical | `modem/` | AFSK modulation (1200/2200 Hz), 300 baud, per-device audio streams |
+| Physical | `modem/` | AFSK modulation (1200/2200 Hz), 300/1200 baud, per-device audio streams |
 | Data Link | `datalink/` | Framing, preamble sync, HDLC byte stuffing, CRC-16 with 1-2 bit error correction |
 | Transport | `transport/` | Stop-and-Wait ARQ, 3-way handshake sessions |
 | HTTP | `http/` | HTTP/1.1 client/server over modem session |
@@ -117,15 +117,14 @@ Preamble (16 x 0xAA) | Sync (0x7E 0x7E) | Type (1B) | Seq (2B) | Len (2B) | Payl
 
 ### Performance
 
-| Metric | Value |
-|--------|-------|
-| Baud rate | 300 baud |
-| Max payload per frame | 64 bytes |
-| Effective throughput | ~6 bytes/sec (with ARQ overhead) |
-| example.com (~530B) | ~73 seconds |
-| info.cern.ch (~650B) | ~108 seconds |
+Measured over Virtual Audio Cable (Muzychenko) on a single Windows machine:
 
-Throughput is limited by half-duplex stop-and-wait ARQ: each 64-byte DATA frame requires an ACK before the next frame is sent.
+| Page | 300 baud | 1200 baud | Speedup |
+|------|----------|-----------|---------|
+| example.com (528 B) | 72.5s / 7.3 B/s | 30.2s / 17.5 B/s | 2.4x |
+| info.cern.ch (646 B) | 78.3s / 8.2 B/s | 32.9s / 19.7 B/s | 2.4x |
+
+Max payload per frame is 64 bytes. Throughput is limited by half-duplex stop-and-wait ARQ: each DATA frame requires an ACK before the next is sent. Use `--baud-rate 1200` on both sides for faster transfers over cable or virtual cable.
 
 ## CLI Commands
 
@@ -144,6 +143,7 @@ Throughput is limited by half-duplex stop-and-wait ARQ: each 64-byte DATA frame 
 | `MODEM_INPUT_DEVICE` | Microphone device index |
 | `MODEM_OUTPUT_DEVICE` | Speaker device index |
 | `MODEM_TX_VOLUME` | Transmit volume 0.0-1.0 (overrides profile) |
+| `MODEM_BAUD_RATE` | Baud rate: `300` (default) or `1200` |
 | `MODEM_LOOPBACK` | Enable loopback mode (`1`) |
 | `MODEM_AUDIBLE` | Play audio in loopback mode |
 
@@ -168,13 +168,14 @@ pytest tests/ -v --cov=modumb
 
 # E2e test through virtual audio cables (Windows)
 python scripts/test_e2e_vac.py small
+python scripts/test_e2e_vac.py small --baud-rate 1200
 python scripts/test_e2e_vac.py medium
 ```
 
 ## Limitations
 
 - **HTTP only** -- HTTPS CONNECT tunneling not yet implemented
-- **Slow** -- 300 baud with stop-and-wait ARQ, best for small pages and API responses
+- **Slow** -- 300/1200 baud with stop-and-wait ARQ, best for small pages and API responses
 - **Half-duplex** -- one direction at a time (no simultaneous send/receive)
 - **Max response** -- 1MB default (configurable via `--max-response-size`)
 

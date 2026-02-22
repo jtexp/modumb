@@ -174,10 +174,10 @@ class HttpServer:
         if not self.modem.is_running:
             self.modem.start()
 
-        ack_timeout = timeout_for_baud(self.modem.baud_rate)
-        self._framer = Framer(self.modem, frame_timeout=ack_timeout)
+        self._framer = Framer(self.modem)
         self._framer.start()
 
+        ack_timeout = timeout_for_baud(self.modem.baud_rate)
         self._session_manager = SessionManager(self._framer, timeout=ack_timeout)
         self._running = True
 

@@ -65,10 +65,10 @@ class LocalProxy:
         self._modem = self._create_modem()
         self._modem.start()
 
-        ack_timeout = timeout_for_baud(self._modem.baud_rate)
-        self._framer = Framer(self._modem, frame_timeout=ack_timeout)
+        self._framer = Framer(self._modem)
         self._framer.start()
 
+        ack_timeout = timeout_for_baud(self._modem.baud_rate)
         self._session_mgr = SessionManager(self._framer, timeout=ack_timeout)
         self._session = self._session_mgr.create_client_session()
 
