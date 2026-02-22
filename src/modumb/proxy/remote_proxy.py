@@ -267,9 +267,12 @@ class RemoteRelay:
 
         print(f"Modem relay starting (mode={self.config.mode}, baud={self.config.baud_rate}, duplex={self.config.duplex})",
               file=sys.stderr, flush=True)
-        print("Waiting for modem connections...", file=sys.stderr, flush=True)
 
-        self._server.serve_forever()
+        def _on_ready():
+            print("Waiting for modem connections...", file=sys.stderr, flush=True)
+            print("RELAY READY", file=sys.stderr, flush=True)
+
+        self._server.serve_forever(on_ready=_on_ready)
 
     def stop(self) -> None:
         """Stop the relay."""

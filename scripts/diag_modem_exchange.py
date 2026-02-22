@@ -16,6 +16,8 @@ import time
 import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.dirname(__file__))
+from vac_lock import vac_lock
 
 import sounddevice as sd
 from modumb.modem.modem import Modem
@@ -124,70 +126,72 @@ def test_modem_send_receive(label, tx_modem, rx_modem, frame):
 
 def main():
     print('=== Modem-to-Modem Exchange Diagnostic ===')
-    print_dev_info()
 
-    profile = get_profile('cable')
-    print(f'\nProfile: {profile.name} (tx_volume={profile.tx_volume}, '
-          f'lead_silence={profile.lead_silence}, trail_silence={profile.trail_silence})')
+    with vac_lock():
+        print_dev_info()
 
-    # Create proxy modem (output=11 VAC1, input=5 VAC2)
-    proxy_modem = Modem(
-        input_device=PROXY_INPUT,
-        output_device=PROXY_OUTPUT,
-        profile=profile,
-    )
-    print(f'\nProxy modem: rate={proxy_modem.sample_rate}Hz')
+        profile = get_profile('cable')
+        print(f'\nProfile: {profile.name} (tx_volume={profile.tx_volume}, '
+              f'lead_silence={profile.lead_silence}, trail_silence={profile.trail_silence})')
 
-    # Create relay modem (output=8 VAC2, input=3 VAC1)
-    relay_modem = Modem(
-        input_device=RELAY_INPUT,
-        output_device=RELAY_OUTPUT,
-        profile=profile,
-    )
-    print(f'Relay modem: rate={relay_modem.sample_rate}Hz')
+        # Create proxy modem (output=11 VAC1, input=5 VAC2)
+        proxy_modem = Modem(
+            input_device=PROXY_INPUT,
+            output_device=PROXY_OUTPUT,
+            profile=profile,
+        )
+        print(f'\nProxy modem: rate={proxy_modem.sample_rate}Hz')
 
-    # Start both modems
-    proxy_modem.start()
-    relay_modem.start()
-    time.sleep(1)  # Let streams settle
+        # Create relay modem (output=8 VAC2, input=3 VAC1)
+        relay_modem = Modem(
+            input_device=RELAY_INPUT,
+            output_device=RELAY_OUTPUT,
+            profile=profile,
+        )
+        print(f'Relay modem: rate={relay_modem.sample_rate}Hz')
 
-    results = {}
+        # Start both modems
+        proxy_modem.start()
+        relay_modem.start()
+        time.sleep(1)  # Let streams settle
 
-    try:
-        # Test 1: Proxy -> VAC Cable 1 -> Relay (SYN frame)
-        syn = Frame.create_syn()
-        results['SYN: proxy->relay'] = test_modem_send_receive(
-            'Proxy -> Relay (SYN via VAC Cable 1)',
-            proxy_modem, relay_modem, syn)
+        results = {}
 
-        time.sleep(1)
+        try:
+            # Test 1: Proxy -> VAC Cable 1 -> Relay (SYN frame)
+            syn = Frame.create_syn()
+            results['SYN: proxy->relay'] = test_modem_send_receive(
+                'Proxy -> Relay (SYN via VAC Cable 1)',
+                proxy_modem, relay_modem, syn)
 
-        # Test 2: Relay -> VAC Cable 2 -> Proxy (SYN-ACK frame)
-        syn_ack = Frame.create_syn_ack()
-        results['SYN-ACK: relay->proxy'] = test_modem_send_receive(
-            'Relay -> Proxy (SYN-ACK via VAC Cable 2)',
-            relay_modem, proxy_modem, syn_ack)
+            time.sleep(1)
 
-        time.sleep(1)
+            # Test 2: Relay -> VAC Cable 2 -> Proxy (SYN-ACK frame)
+            syn_ack = Frame.create_syn_ack()
+            results['SYN-ACK: relay->proxy'] = test_modem_send_receive(
+                'Relay -> Proxy (SYN-ACK via VAC Cable 2)',
+                relay_modem, proxy_modem, syn_ack)
 
-        # Test 3: Proxy -> VAC Cable 1 -> Relay (DATA frame, 64B)
-        payload = b'GET http://example.com HTTP/1.1\r\nHost: example.com\r\n\r\nPad!!'
-        payload = payload[:64].ljust(64, b'.')
-        data_frame = Frame.create_data(1, payload)
-        results['DATA: proxy->relay'] = test_modem_send_receive(
-            'Proxy -> Relay (DATA 64B via VAC Cable 1)',
-            proxy_modem, relay_modem, data_frame)
+            time.sleep(1)
 
-    finally:
-        proxy_modem.stop()
-        relay_modem.stop()
+            # Test 3: Proxy -> VAC Cable 1 -> Relay (DATA frame, 64B)
+            payload = b'GET http://example.com HTTP/1.1\r\nHost: example.com\r\n\r\nPad!!'
+            payload = payload[:64].ljust(64, b'.')
+            data_frame = Frame.create_data(1, payload)
+            results['DATA: proxy->relay'] = test_modem_send_receive(
+                'Proxy -> Relay (DATA 64B via VAC Cable 1)',
+                proxy_modem, relay_modem, data_frame)
 
-    # Summary
-    print('\n=== Summary ===')
-    for test, passed in results.items():
-        print(f'  {test}: {"PASS" if passed else "FAIL"}')
+        finally:
+            proxy_modem.stop()
+            relay_modem.stop()
 
-    return 0 if all(results.values()) else 1
+        # Summary
+        print('\n=== Summary ===')
+        for test, passed in results.items():
+            print(f'  {test}: {"PASS" if passed else "FAIL"}')
+
+        return 0 if all(results.values()) else 1
 
 
 if __name__ == '__main__':

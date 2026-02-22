@@ -228,9 +228,16 @@ class HttpServer:
 
         return True
 
-    def serve_forever(self) -> None:
-        """Serve connections forever (blocking)."""
+    def serve_forever(self, on_ready=None) -> None:
+        """Serve connections forever (blocking).
+
+        Args:
+            on_ready: Optional callback invoked after start() completes
+                      (modem + framer + session manager all initialized).
+        """
         self.start()
+        if on_ready is not None:
+            on_ready()
 
         while self._running:
             try:
