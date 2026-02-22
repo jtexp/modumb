@@ -14,6 +14,8 @@ import queue
 import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.dirname(__file__))
+from vac_lock import vac_lock
 
 import numpy as np
 import sounddevice as sd
@@ -153,39 +155,41 @@ def test_frame_roundtrip(sample_rate, frame, label):
 
 def main():
     print('=== VAC Frame Roundtrip Diagnostic ===')
-    print(f'Output device: {OUT_DEV} ({sd.query_devices(OUT_DEV)["name"]})')
-    print(f'Input device:  {IN_DEV} ({sd.query_devices(IN_DEV)["name"]})')
 
-    # Check supported rates
-    for rate in [44100, 48000]:
-        out_ok = check_rate(OUT_DEV, rate, 'output')
-        in_ok = check_rate(IN_DEV, rate, 'input')
-        print(f'{rate} Hz: output={out_ok} input={in_ok}')
+    with vac_lock():
+        print(f'Output device: {OUT_DEV} ({sd.query_devices(OUT_DEV)["name"]})')
+        print(f'Input device:  {IN_DEV} ({sd.query_devices(IN_DEV)["name"]})')
 
-    results = {}
+        # Check supported rates
+        for rate in [44100, 48000]:
+            out_ok = check_rate(OUT_DEV, rate, 'output')
+            in_ok = check_rate(IN_DEV, rate, 'input')
+            print(f'{rate} Hz: output={out_ok} input={in_ok}')
 
-    # Test at both sample rates
-    for sr in [48000, 44100]:
-        # Test 1: SYN frame (small, no payload)
-        syn = Frame.create_syn()
-        results[f'SYN@{sr}'] = test_frame_roundtrip(sr, syn, f'SYN frame')
+        results = {}
 
-        # Test 2: DATA frame with short payload
-        short_data = Frame.create_data(0, b'Hello VAC!')
-        results[f'SHORT@{sr}'] = test_frame_roundtrip(sr, short_data, f'Short DATA frame')
+        # Test at both sample rates
+        for sr in [48000, 44100]:
+            # Test 1: SYN frame (small, no payload)
+            syn = Frame.create_syn()
+            results[f'SYN@{sr}'] = test_frame_roundtrip(sr, syn, f'SYN frame')
 
-        # Test 3: DATA frame with max payload (64 bytes)
-        long_payload = b'GET http://example.com HTTP/1.1\r\nHost: example.com\r\n\r\nPadding!'
-        long_payload = long_payload[:64].ljust(64, b'.')
-        long_data = Frame.create_data(1, long_payload)
-        results[f'LONG@{sr}'] = test_frame_roundtrip(sr, long_data, f'Long DATA frame (64B)')
+            # Test 2: DATA frame with short payload
+            short_data = Frame.create_data(0, b'Hello VAC!')
+            results[f'SHORT@{sr}'] = test_frame_roundtrip(sr, short_data, f'Short DATA frame')
 
-    # Summary
-    print('\n=== Summary ===')
-    for test, passed in results.items():
-        print(f'  {test}: {"PASS" if passed else "FAIL"}')
+            # Test 3: DATA frame with max payload (64 bytes)
+            long_payload = b'GET http://example.com HTTP/1.1\r\nHost: example.com\r\n\r\nPadding!'
+            long_payload = long_payload[:64].ljust(64, b'.')
+            long_data = Frame.create_data(1, long_payload)
+            results[f'LONG@{sr}'] = test_frame_roundtrip(sr, long_data, f'Long DATA frame (64B)')
 
-    return 0 if all(results.values()) else 1
+        # Summary
+        print('\n=== Summary ===')
+        for test, passed in results.items():
+            print(f'  {test}: {"PASS" if passed else "FAIL"}')
+
+        return 0 if all(results.values()) else 1
 
 
 if __name__ == '__main__':

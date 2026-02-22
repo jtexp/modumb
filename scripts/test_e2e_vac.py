@@ -21,14 +21,19 @@ import os
 import time
 import socket
 import subprocess
+import threading
 import urllib.request
 import urllib.error
+
+# Sibling import
+sys.path.insert(0, os.path.dirname(__file__))
+from vac_lock import vac_lock
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-PY = os.path.join(os.path.dirname(__file__), '..', '.venv', 'Scripts', 'python.exe')
+PY = sys.executable
 
 # VAC Cable 1: LocalProxy TX -> RemoteRelay RX
 VAC1_OUTPUT = 11  # Line Out (Virtual Cable 1)
@@ -41,6 +46,8 @@ VAC2_INPUT = 5    # Line 2 (Virtual Cable 2)
 PROXY_HOST = '127.0.0.1'
 PROXY_PORT = 8080
 MODE = 'cable'
+
+RELAY_READY_MARKER = 'RELAY READY'
 
 # Test cases: (url, expected_content_substring, timeout_seconds)
 TESTS = {
@@ -64,6 +71,47 @@ def wait_for_port(host, port, timeout=30):
         except (ConnectionRefusedError, OSError):
             time.sleep(0.5)
     return False
+
+
+def wait_for_ready(proc, marker, timeout=30):
+    """Read proc.stderr lines until marker found or timeout.
+
+    Returns True if marker was seen, False on timeout/exit.
+    Lines are forwarded to our stderr with a [relay] prefix.
+
+    Uses a reader thread because Windows select() doesn't work on pipes.
+    """
+    found = threading.Event()
+
+    def _reader():
+        try:
+            for raw_line in proc.stderr:
+                text = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                print(f"[relay] {text}", file=sys.stderr, flush=True)
+                if marker in text:
+                    found.set()
+                    return
+        except (OSError, ValueError):
+            pass
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    return found.wait(timeout=timeout)
+
+
+def drain_stderr(proc, prefix="[relay]"):
+    """Drain proc.stderr in a daemon thread, printing with prefix."""
+    def _drain():
+        try:
+            for raw_line in proc.stderr:
+                text = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if text:
+                    print(f"{prefix} {text}", file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass
+    t = threading.Thread(target=_drain, daemon=True)
+    t.start()
+    return t
 
 
 def kill_proc(proc, name):
@@ -139,72 +187,82 @@ def main():
     test_url, expected_content, timeout = TESTS[test_name]
     print(f'=== E2E Proxy Test: {test_name} ({test_url}) baud={baud_rate} duplex={duplex} ===', flush=True)
 
-    relay_proc = None
-    proxy_proc = None
-    start_time = time.time()
+    with vac_lock():
+        relay_proc = None
+        proxy_proc = None
+        start_time = time.time()
 
-    try:
-        # ---- Start RemoteRelay ----
-        print(f'Starting relay (output={VAC2_OUTPUT}, input={VAC1_INPUT})...',
-              flush=True)
-        relay_cmd = [
-            PY, '-m', 'modumb.proxy.remote_proxy',
-            '--mode', MODE,
-            '--baud-rate', str(baud_rate),
-            '--duplex', duplex,
-            '-o', str(VAC2_OUTPUT),
-            '-i', str(VAC1_INPUT),
-        ]
-        relay_proc = subprocess.Popen(
-            relay_cmd,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
-        time.sleep(3)
-        if relay_proc.poll() is not None:
-            print(f'FAIL: Relay exited early (code={relay_proc.returncode})', flush=True)
-            return 1
+        try:
+            # ---- Start RemoteRelay ----
+            print(f'Starting relay (output={VAC2_OUTPUT}, input={VAC1_INPUT})...',
+                  flush=True)
+            relay_cmd = [
+                PY, '-m', 'modumb.proxy.remote_proxy',
+                '--mode', MODE,
+                '--baud-rate', str(baud_rate),
+                '--duplex', duplex,
+                '-o', str(VAC2_OUTPUT),
+                '-i', str(VAC1_INPUT),
+            ]
+            relay_proc = subprocess.Popen(
+                relay_cmd,
+                stdout=sys.stdout,
+                stderr=subprocess.PIPE,
+            )
 
-        # ---- Start LocalProxy ----
-        print(f'Starting proxy (output={VAC1_OUTPUT}, input={VAC2_INPUT}, '
-              f'port={PROXY_PORT})...', flush=True)
-        proxy_cmd = [
-            PY, '-m', 'modumb.proxy.local_proxy',
-            '--mode', MODE,
-            '--baud-rate', str(baud_rate),
-            '--duplex', duplex,
-            '-o', str(VAC1_OUTPUT),
-            '-i', str(VAC2_INPUT),
-            '--port', str(PROXY_PORT),
-        ]
-        proxy_proc = subprocess.Popen(
-            proxy_cmd,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-        )
+            # Wait for relay to finish initializing (modem + framer started)
+            print('Waiting for relay to initialize...', flush=True)
+            if not wait_for_ready(relay_proc, RELAY_READY_MARKER, timeout=30):
+                if relay_proc.poll() is not None:
+                    print(f'FAIL: Relay exited early (code={relay_proc.returncode})',
+                          flush=True)
+                else:
+                    print('FAIL: Relay did not become ready within 30s', flush=True)
+                return 1
 
-        # ---- Wait for proxy TCP port ----
-        print('Waiting for proxy to be ready...', flush=True)
-        if not wait_for_port(PROXY_HOST, PROXY_PORT, timeout=15):
-            print('FAIL: Proxy port never became ready', flush=True)
-            return 1
-        print(f'Proxy is listening on {PROXY_HOST}:{PROXY_PORT}', flush=True)
+            # Start draining relay stderr in background
+            drain_stderr(relay_proc)
 
-        # ---- Run the test ----
-        passed = run_test(test_url, expected_content, timeout,
-                          PROXY_HOST, PROXY_PORT)
+            # ---- Start LocalProxy ----
+            print(f'Starting proxy (output={VAC1_OUTPUT}, input={VAC2_INPUT}, '
+                  f'port={PROXY_PORT})...', flush=True)
+            proxy_cmd = [
+                PY, '-m', 'modumb.proxy.local_proxy',
+                '--mode', MODE,
+                '--baud-rate', str(baud_rate),
+                '--duplex', duplex,
+                '-o', str(VAC1_OUTPUT),
+                '-i', str(VAC2_INPUT),
+                '--port', str(PROXY_PORT),
+            ]
+            proxy_proc = subprocess.Popen(
+                proxy_cmd,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
 
-        total_time = time.time() - start_time
-        print(f'\nTotal time: {total_time:.1f}s', flush=True)
-        return 0 if passed else 1
+            # ---- Wait for proxy TCP port ----
+            print('Waiting for proxy to be ready...', flush=True)
+            if not wait_for_port(PROXY_HOST, PROXY_PORT, timeout=15):
+                print('FAIL: Proxy port never became ready', flush=True)
+                return 1
+            print(f'Proxy is listening on {PROXY_HOST}:{PROXY_PORT}', flush=True)
 
-    except KeyboardInterrupt:
-        print('\nInterrupted by user', flush=True)
-        return 130
+            # ---- Run the test ----
+            passed = run_test(test_url, expected_content, timeout,
+                              PROXY_HOST, PROXY_PORT)
 
-    finally:
-        kill_proc(proxy_proc, 'proxy')
-        kill_proc(relay_proc, 'relay')
+            total_time = time.time() - start_time
+            print(f'\nTotal time: {total_time:.1f}s', flush=True)
+            return 0 if passed else 1
+
+        except KeyboardInterrupt:
+            print('\nInterrupted by user', flush=True)
+            return 130
+
+        finally:
+            kill_proc(proxy_proc, 'proxy')
+            kill_proc(relay_proc, 'relay')
 
 
 if __name__ == '__main__':
