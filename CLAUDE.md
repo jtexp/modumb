@@ -157,6 +157,24 @@ All half-duplex tests (1-4) must pass with zero retransmissions. Full-duplex tes
 (5-7) should be faster. If short on time, tests 1, 2, and 6 are the minimum
 (both baud rates half-duplex + one full-duplex).
 
+## Session Close Protocol
+
+Before finishing a session that touched modem/datalink/transport/HTTP/proxy code,
+run the VAC e2e smoke tests. These catch audio timing regressions that unit tests miss.
+
+```bash
+PY="/mnt/c/Users/John/modumb/.venv/Scripts/python.exe"
+
+# 1. Unit tests (always)
+$PY -m pytest tests/ -v
+
+# 2. VAC e2e smoke tests (if any modem/datalink/transport/HTTP/proxy code changed)
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex full
+```
+
+Both must pass before committing. If only docs/tests/config changed, skip e2e.
+
 ## Issue Tracking
 
 We use `bd` (beads) for lightweight issue tracking with dependency support.
