@@ -164,7 +164,7 @@ class AudioInterface:
         However, if the device supports our preferred rate (48000 Hz),
         we keep it — the AFSK demodulator was designed for 48000 Hz and
         works better there (160 samples/bit vs 147 at 44100).  Virtual
-        audio cables (VB-Cable, Virtual Audio Cable) report 44100 as
+        audio cables (e.g. Virtual Audio Cable) report 44100 as
         default but handle 48000 perfectly.
         """
         preferred_rate = self.sample_rate  # typically 48000

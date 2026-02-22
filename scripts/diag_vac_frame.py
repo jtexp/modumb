@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Diagnostic: send a frame through VB-Cable and check demodulation quality.
+"""Diagnostic: send a frame through Virtual Audio Cable and check demodulation quality.
 
-Tests the raw modulate → VB-Cable → demodulate path for bit errors.
-Uses device 7 (VB-Cable output) → device 3 (VB-Cable input).
+Tests the raw modulate -> VAC -> demodulate path for bit errors.
+Uses device 11 (VAC Cable 1 output) -> device 3 (VAC Cable 1 input).
 
 Usage:
-    .venv/Scripts/python.exe C:/Users/John/modumb/scripts/diag_vbcable_frame.py
+    .venv/Scripts/python.exe C:/Users/John/modumb/scripts/diag_vac_frame.py
 """
 import sys
 import os
@@ -20,8 +20,8 @@ import sounddevice as sd
 from modumb.modem.afsk import AFSKModulator, AFSKDemodulator, SAMPLE_RATE, BAUD_RATE
 from modumb.datalink.frame import Frame
 
-OUT_DEV = 7   # VB-Cable Input (output device)
-IN_DEV = 3    # VB-Cable Output (input device)
+OUT_DEV = 11  # VAC Cable 1 Line Out (output device)
+IN_DEV = 3    # VAC Cable 1 Line In (input device)
 TX_VOLUME = 0.5
 
 def check_rate(dev, rate, kind):
@@ -36,7 +36,7 @@ def check_rate(dev, rate, kind):
         return False
 
 def test_frame_roundtrip(sample_rate, frame, label):
-    """Test modulate → VB-Cable → demodulate for a single frame."""
+    """Test modulate -> VAC -> demodulate for a single frame."""
     frame_bytes = frame.encode()
     print(f'\n--- {label} @ {sample_rate} Hz ---')
     print(f'Frame: type={frame.frame_type.name} seq={frame.sequence} '
@@ -152,7 +152,7 @@ def test_frame_roundtrip(sample_rate, frame, label):
 
 
 def main():
-    print('=== VB-Cable Frame Roundtrip Diagnostic ===')
+    print('=== VAC Frame Roundtrip Diagnostic ===')
     print(f'Output device: {OUT_DEV} ({sd.query_devices(OUT_DEV)["name"]})')
     print(f'Input device:  {IN_DEV} ({sd.query_devices(IN_DEV)["name"]})')
 
@@ -171,7 +171,7 @@ def main():
         results[f'SYN@{sr}'] = test_frame_roundtrip(sr, syn, f'SYN frame')
 
         # Test 2: DATA frame with short payload
-        short_data = Frame.create_data(0, b'Hello VB-Cable!')
+        short_data = Frame.create_data(0, b'Hello VAC!')
         results[f'SHORT@{sr}'] = test_frame_roundtrip(sr, short_data, f'Short DATA frame')
 
         # Test 3: DATA frame with max payload (64 bytes)

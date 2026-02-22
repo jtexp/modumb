@@ -23,7 +23,7 @@ from modumb.modem.profiles import get_profile
 from modumb.datalink.frame import Frame
 from modumb.datalink.framer import Framer
 
-# Device mapping — two VAC cables (same as test_e2e_vbcable.py)
+# Device mapping — two VAC cables (same as test_e2e_vac.py)
 PROXY_OUTPUT = 11   # VAC Cable 1 Line Out (proxy TX)
 PROXY_INPUT = 5     # VAC Cable 2 Line In (proxy RX)
 RELAY_OUTPUT = 8    # VAC Cable 2 Line Out (relay TX)

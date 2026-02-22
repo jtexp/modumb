@@ -14,7 +14,7 @@ Device mapping:
     RX <- dev 5  (VAC2 In)    <--    dev 8 (VAC2 Out) <- TX
 
 Usage:
-    .venv/Scripts/python.exe C:/Users/John/modumb/scripts/test_e2e_vbcable.py
+    .venv/Scripts/python.exe C:/Users/John/modumb/scripts/test_e2e_vac.py
 """
 import sys
 import os
