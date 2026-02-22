@@ -4,6 +4,7 @@ Accepts HTTP requests from browser/curl on localhost, forwards them
 over the modem session to the remote relay, returns the response.
 """
 
+import os
 import sys
 import threading
 import io
@@ -42,6 +43,7 @@ class LocalProxy:
         """Create a Modem configured from our ProxyConfig."""
         profile = get_profile(self.config.mode)
         loopback = self.config.mode == "loopback"
+        full_duplex = self.config.duplex == "full"
         return Modem(
             loopback=loopback,
             audible=self.config.audible,
@@ -49,6 +51,7 @@ class LocalProxy:
             output_device=self.config.output_device,
             baud_rate=self.config.baud_rate,
             profile=profile,
+            full_duplex=full_duplex,
         )
 
     def _ensure_session(self) -> bool:
@@ -65,11 +68,12 @@ class LocalProxy:
         self._modem = self._create_modem()
         self._modem.start()
 
-        self._framer = Framer(self._modem)
+        full_duplex = self.config.duplex == "full"
+        self._framer = Framer(self._modem, full_duplex=full_duplex)
         self._framer.start()
 
         ack_timeout = timeout_for_baud(self._modem.baud_rate)
-        self._session_mgr = SessionManager(self._framer, timeout=ack_timeout)
+        self._session_mgr = SessionManager(self._framer, timeout=ack_timeout, full_duplex=full_duplex)
         self._session = self._session_mgr.create_client_session()
 
         if self._session is None:
@@ -176,6 +180,7 @@ class LocalProxy:
               file=sys.stderr, flush=True)
         print(f"  Mode: {self.config.mode}", file=sys.stderr, flush=True)
         print(f"  Baud rate: {self.config.baud_rate}", file=sys.stderr, flush=True)
+        print(f"  Duplex: {self.config.duplex}", file=sys.stderr, flush=True)
         print(f"  Usage: curl --proxy http://{self.config.listen_host}:{self.config.listen_port}"
               f" http://example.com", file=sys.stderr, flush=True)
 
@@ -219,13 +224,22 @@ def main():
                         help="Input device index")
     parser.add_argument("-o", "--output-device", type=int, metavar="N",
                         help="Output device index")
+    parser.add_argument("--duplex", choices=["half", "full"],
+                        default=os.environ.get("MODEM_DUPLEX", "half"),
+                        help="Duplex mode (default: $MODEM_DUPLEX or half, full for cable/loopback)")
     args = parser.parse_args()
+
+    mode = args.mode or os.environ.get("MODEM_MODE", "acoustic")
+    if args.duplex == "full" and mode == "acoustic":
+        print("ERROR: --duplex full requires --mode cable or loopback", file=sys.stderr)
+        sys.exit(1)
 
     config = ProxyConfig(
         listen_host=args.host,
         listen_port=args.port,
-        mode=args.mode or "acoustic",
+        mode=mode,
         baud_rate=args.baud_rate,
+        duplex=args.duplex,
         input_device=args.input_device,
         output_device=args.output_device,
         audible=args.audible,

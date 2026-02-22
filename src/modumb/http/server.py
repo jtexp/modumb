@@ -146,15 +146,18 @@ class HttpServer:
         self,
         modem: Modem,
         handler: Optional[RequestHandler] = None,
+        full_duplex: bool = False,
     ):
         """Initialize HTTP server.
 
         Args:
             modem: Modem for communication
             handler: Request handler function
+            full_duplex: If True, skip half-duplex delays throughout stack
         """
         self.modem = modem
         self.handler = handler or self._default_handler
+        self._full_duplex = full_duplex
 
         self._framer: Optional[Framer] = None
         self._session_manager: Optional[SessionManager] = None
@@ -174,11 +177,11 @@ class HttpServer:
         if not self.modem.is_running:
             self.modem.start()
 
-        self._framer = Framer(self.modem)
+        self._framer = Framer(self.modem, full_duplex=self._full_duplex)
         self._framer.start()
 
         ack_timeout = timeout_for_baud(self.modem.baud_rate)
-        self._session_manager = SessionManager(self._framer, timeout=ack_timeout)
+        self._session_manager = SessionManager(self._framer, timeout=ack_timeout, full_duplex=self._full_duplex)
         self._running = True
 
     def stop(self) -> None:

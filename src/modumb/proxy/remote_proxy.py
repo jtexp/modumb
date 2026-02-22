@@ -4,6 +4,7 @@ Receives HTTP requests over modem, fetches from the real internet
 via urllib, and returns the response back over modem.
 """
 
+import os
 import sys
 import urllib.request
 import urllib.error
@@ -144,6 +145,7 @@ class RemoteRelay:
         """Create a Modem configured from our ProxyConfig."""
         profile = get_profile(self.config.mode)
         loopback = self.config.mode == "loopback"
+        full_duplex = self.config.duplex == "full"
         return Modem(
             loopback=loopback,
             audible=self.config.audible,
@@ -151,15 +153,17 @@ class RemoteRelay:
             output_device=self.config.output_device,
             baud_rate=self.config.baud_rate,
             profile=profile,
+            full_duplex=full_duplex,
         )
 
     def start(self) -> None:
         """Start the relay (blocking)."""
         modem = self._create_modem()
         handler = create_relay_handler(self.config)
-        self._server = HttpServer(modem, handler=handler)
+        full_duplex = self.config.duplex == "full"
+        self._server = HttpServer(modem, handler=handler, full_duplex=full_duplex)
 
-        print(f"Modem relay starting (mode={self.config.mode}, baud={self.config.baud_rate})",
+        print(f"Modem relay starting (mode={self.config.mode}, baud={self.config.baud_rate}, duplex={self.config.duplex})",
               file=sys.stderr, flush=True)
         print("Waiting for modem connections...", file=sys.stderr, flush=True)
 
@@ -196,11 +200,20 @@ def main():
                         metavar="BYTES", help="Max response body size (default: 1MB)")
     parser.add_argument("--allowed-hosts", nargs="*", metavar="HOST",
                         help="Only allow requests to these hosts")
+    parser.add_argument("--duplex", choices=["half", "full"],
+                        default=os.environ.get("MODEM_DUPLEX", "half"),
+                        help="Duplex mode (default: $MODEM_DUPLEX or half, full for cable/loopback)")
     args = parser.parse_args()
 
+    mode = args.mode or os.environ.get("MODEM_MODE", "acoustic")
+    if args.duplex == "full" and mode == "acoustic":
+        print("ERROR: --duplex full requires --mode cable or loopback", file=sys.stderr)
+        sys.exit(1)
+
     config = ProxyConfig(
-        mode=args.mode or "acoustic",
+        mode=mode,
         baud_rate=args.baud_rate,
+        duplex=args.duplex,
         input_device=args.input_device,
         output_device=args.output_device,
         audible=args.audible,

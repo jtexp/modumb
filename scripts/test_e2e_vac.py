@@ -125,13 +125,16 @@ def main():
                         choices=list(TESTS.keys()), help='Test case to run')
     parser.add_argument('--baud-rate', type=int, default=300,
                         help='Modem baud rate (default: 300)')
+    parser.add_argument('--duplex', choices=['half', 'full'], default='half',
+                        help='Duplex mode (default: half, full for cable/loopback)')
     args = parser.parse_args()
 
     test_name = args.test
     baud_rate = args.baud_rate
+    duplex = args.duplex
 
     test_url, expected_content, timeout = TESTS[test_name]
-    print(f'=== E2E Proxy Test: {test_name} ({test_url}) baud={baud_rate} ===', flush=True)
+    print(f'=== E2E Proxy Test: {test_name} ({test_url}) baud={baud_rate} duplex={duplex} ===', flush=True)
 
     relay_proc = None
     proxy_proc = None
@@ -145,6 +148,7 @@ def main():
             PY, '-m', 'modumb.proxy.remote_proxy',
             '--mode', MODE,
             '--baud-rate', str(baud_rate),
+            '--duplex', duplex,
             '-o', str(VAC2_OUTPUT),
             '-i', str(VAC1_INPUT),
         ]
@@ -165,6 +169,7 @@ def main():
             PY, '-m', 'modumb.proxy.local_proxy',
             '--mode', MODE,
             '--baud-rate', str(baud_rate),
+            '--duplex', duplex,
             '-o', str(VAC1_OUTPUT),
             '-i', str(VAC2_INPUT),
             '--port', str(PROXY_PORT),

@@ -82,6 +82,7 @@ class AudioInterface:
         audible: bool = False,
         echo_guard_time: Optional[float] = None,
         hdmi_wake_enabled: Optional[bool] = None,
+        full_duplex: bool = False,
     ):
         """Initialize audio interface.
 
@@ -137,6 +138,9 @@ class AudioInterface:
         self._output_stream: Optional["sd.OutputStream"] = None
         self._running = False
         self._lock = threading.Lock()
+
+        # Full-duplex mode: skip echo suppression (no echo on cable/loopback)
+        self.full_duplex = full_duplex
 
         # Echo suppression state
         self._transmitting = False
@@ -324,10 +328,12 @@ class AudioInterface:
             pass  # Could log status flags
 
         # Echo suppression: ignore audio during transmission and guard period
-        if self._transmitting:
-            return
-        if time.time() < self._last_tx_end + self._echo_guard_time:
-            return
+        # (skipped in full-duplex: no echo on cable/loopback)
+        if not self.full_duplex:
+            if self._transmitting:
+                return
+            if time.time() < self._last_tx_end + self._echo_guard_time:
+                return
 
         # Copy data to queue
         self._rx_queue.put(indata.copy().flatten())
@@ -389,8 +395,10 @@ class AudioInterface:
         self.wake_up_output()
 
         # Echo suppression: mark as transmitting, clear buffer
-        self._transmitting = True
-        self.clear_receive_buffer()
+        # (skipped in full-duplex: no echo on cable/loopback)
+        if not self.full_duplex:
+            self._transmitting = True
+            self.clear_receive_buffer()
 
         # Write to per-device output stream (avoids global sd.play() state
         # conflicts when multiple modem instances run simultaneously)
@@ -403,11 +411,12 @@ class AudioInterface:
         drain = np.zeros((self.blocksize, 1), dtype=np.float32)
         self._output_stream.write(drain)
 
-        # Echo suppression: record end time, clear any echo that snuck through
-        self._transmitting = False
-        self._last_tx_end = time.time()
+        if not self.full_duplex:
+            # Echo suppression: record end time, clear any echo that snuck through
+            self._transmitting = False
+            self._last_tx_end = time.time()
+            self.clear_receive_buffer()
         self._last_output_time = time.time()  # Track for HDMI wake-up
-        self.clear_receive_buffer()
 
     def receive(self, num_samples: int, timeout: float = 5.0) -> np.ndarray:
         """Receive audio samples.

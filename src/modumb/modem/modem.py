@@ -35,6 +35,7 @@ class Modem:
         output_device: Optional[int] = None,
         tx_volume: Optional[float] = None,
         profile: Optional["AudioProfile"] = None,
+        full_duplex: bool = False,
     ):
         """Initialize modem.
 
@@ -84,6 +85,8 @@ class Modem:
         self._lead_silence = profile.lead_silence if profile else 0.3
         self._trail_silence = profile.trail_silence if profile else 0.2
 
+        self.full_duplex = full_duplex
+
         # Create audio interface if not provided
         if audio is None:
             audio_kwargs = dict(
@@ -92,6 +95,7 @@ class Modem:
                 audible=audible,
                 input_device=input_device,
                 output_device=output_device,
+                full_duplex=full_duplex,
             )
             if profile:
                 audio_kwargs['echo_guard_time'] = profile.echo_guard_time
@@ -113,8 +117,14 @@ class Modem:
             baud_rate=baud_rate,
         )
 
-        # State
-        self._lock = threading.Lock()
+        # State — in full-duplex mode, TX and RX are independent so no lock needed
+        if full_duplex:
+            class _NoOpLock:
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+            self._lock = _NoOpLock()
+        else:
+            self._lock = threading.Lock()
         self._rx_callback: Optional[Callable[[bytes], None]] = None
 
     def start(self) -> None:
@@ -149,7 +159,7 @@ class Modem:
             # Transmit
             self.audio.transmit(samples, blocking=blocking)
 
-            if blocking:
+            if blocking and not self.full_duplex:
                 # Half-duplex turnaround delay
                 time.sleep(TURNAROUND_DELAY)
 
@@ -164,8 +174,10 @@ class Modem:
         """
         with self._lock:
             # Drain any stale audio that accumulated in the receive queue
-            # while we weren't actively listening.
-            self.audio.clear_receive_buffer()
+            # while we weren't actively listening (not needed in full-duplex
+            # where RX runs independently of TX).
+            if not self.full_duplex:
+                self.audio.clear_receive_buffer()
 
             # Measure ambient noise level from a short sample to set
             # adaptive silence threshold (UMIK-1 measurement mics have

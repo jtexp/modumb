@@ -52,6 +52,7 @@ class ReliableTransport:
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
         fragment_size: int = DEFAULT_FRAGMENT_SIZE,
+        full_duplex: bool = False,
     ):
         """Initialize reliable transport.
 
@@ -60,11 +61,13 @@ class ReliableTransport:
             timeout: ACK timeout in seconds
             retries: Maximum retransmission attempts
             fragment_size: Maximum payload size per frame
+            full_duplex: If True, skip turnaround guard delays
         """
         self.framer = framer
         self.timeout = timeout
         self.retries = retries
         self.fragment_size = min(fragment_size, MAX_PAYLOAD_SIZE)
+        self.full_duplex = full_duplex
 
         # Sequence numbers (16-bit, wrapping)
         self._tx_seq = 0
@@ -118,7 +121,8 @@ class ReliableTransport:
             True if acknowledged, False on failure
         """
         # Wait for receiver to be ready (echo guard period)
-        time.sleep(TURNAROUND_GUARD)
+        if not self.full_duplex:
+            time.sleep(TURNAROUND_GUARD)
 
         seq = self._next_seq()
         frame = Frame.create_data(seq, data)

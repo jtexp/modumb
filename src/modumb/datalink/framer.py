@@ -21,6 +21,7 @@ class Framer:
         modem: Modem,
         frame_timeout: float = 2.0,
         tx_delay: float = 0.05,
+        full_duplex: bool = False,
     ):
         """Initialize framer.
 
@@ -28,10 +29,11 @@ class Framer:
             modem: Modem instance for physical layer
             frame_timeout: Timeout for receiving a frame
             tx_delay: Delay before transmitting (for half-duplex)
+            full_duplex: If True, zero out tx_delay (no echo on cable/loopback)
         """
         self.modem = modem
         self.frame_timeout = frame_timeout
-        self.tx_delay = tx_delay
+        self.tx_delay = 0.0 if full_duplex else tx_delay
 
         # Receive state
         self._rx_buffer = bytearray()
