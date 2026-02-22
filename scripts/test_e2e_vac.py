@@ -125,8 +125,8 @@ def main():
                         choices=list(TESTS.keys()), help='Test case to run')
     parser.add_argument('--baud-rate', type=int, default=300,
                         help='Modem baud rate (default: 300)')
-    parser.add_argument('--duplex', choices=['half', 'full'], default='half',
-                        help='Duplex mode (default: half, full for cable/loopback)')
+    parser.add_argument('--duplex', choices=['half', 'full'], default='full',
+                        help='Duplex mode (default: full for cable)')
     args = parser.parse_args()
 
     test_name = args.test

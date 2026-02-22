@@ -15,7 +15,7 @@ class ProxyConfig:
     # Modem
     mode: str = "acoustic"          # acoustic, cable, loopback
     baud_rate: int = 300            # Modem baud rate (300, 1200)
-    duplex: str = "half"            # half or full (full requires cable/loopback)
+    duplex: str = "half"            # half or full (default: full for cable/loopback, half for acoustic)
     input_device: Optional[int] = None
     output_device: Optional[int] = None
     audible: bool = False

@@ -224,13 +224,13 @@ def main():
                         help="Input device index")
     parser.add_argument("-o", "--output-device", type=int, metavar="N",
                         help="Output device index")
-    parser.add_argument("--duplex", choices=["half", "full"],
-                        default=os.environ.get("MODEM_DUPLEX", "half"),
-                        help="Duplex mode (default: $MODEM_DUPLEX or half, full for cable/loopback)")
+    parser.add_argument("--duplex", choices=["half", "full"], default=None,
+                        help="Duplex mode (default: full for cable/loopback, half for acoustic)")
     args = parser.parse_args()
 
     mode = args.mode or os.environ.get("MODEM_MODE", "acoustic")
-    if args.duplex == "full" and mode == "acoustic":
+    duplex = args.duplex or os.environ.get("MODEM_DUPLEX") or ("half" if mode == "acoustic" else "full")
+    if duplex == "full" and mode == "acoustic":
         print("ERROR: --duplex full requires --mode cable or loopback", file=sys.stderr)
         sys.exit(1)
 
@@ -239,7 +239,7 @@ def main():
         listen_port=args.port,
         mode=mode,
         baud_rate=args.baud_rate,
-        duplex=args.duplex,
+        duplex=duplex,
         input_device=args.input_device,
         output_device=args.output_device,
         audible=args.audible,

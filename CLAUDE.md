@@ -77,7 +77,7 @@ Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrap
 | `MODEM_AUDIBLE` | Play audio even in loopback mode |
 | `MODEM_INPUT_DEVICE` / `MODEM_OUTPUT_DEVICE` | Audio device indices |
 | `MODEM_BAUD_RATE` | Baud rate: 300 (default) or 1200 |
-| `MODEM_DUPLEX` | `half` (default) or `full` (cable/loopback only — skips echo suppression and turnaround delays) |
+| `MODEM_DUPLEX` | `half` or `full` (default: `full` for cable/loopback, `half` for acoustic — full skips echo suppression and turnaround delays) |
 | `MODEM_TX_VOLUME` | Transmit volume 0.0-1.0 (overrides profile default) |
 | `PULSE_SERVER` | PulseAudio server address for WSL2 |
 
@@ -143,19 +143,20 @@ $PY "C:/Users/John/modumb/scripts/diag_vac_frame.py"
 full test matrix if Virtual Audio Cable devices are available. Unit tests alone do
 not catch audio timing, clock drift, or real-device I/O regressions.
 
+Cable/VAC tests default to full-duplex. Use `--duplex half` to test half-duplex.
+
 | # | Command | Expected |
 |---|---------|----------|
-| 1 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300` | ~73s, ~7 B/s |
-| 2 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200` | ~30s, ~18 B/s |
-| 3 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 300` | ~78s, ~8 B/s |
-| 4 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200` | ~33s, ~20 B/s |
-| 5 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300 --duplex full` | faster than #1 |
-| 6 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex full` | faster than #2 |
-| 7 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200 --duplex full` | faster than #4 |
+| 1 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300 --duplex half` | ~73s, ~7 B/s |
+| 2 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex half` | ~30s, ~18 B/s |
+| 3 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 300 --duplex half` | ~78s, ~8 B/s |
+| 4 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200 --duplex half` | ~33s, ~20 B/s |
+| 5 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 300` | faster than #1 |
+| 6 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200` | ~27s, ~20 B/s |
+| 7 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium --baud-rate 1200` | faster than #4 |
 
-All half-duplex tests (1-4) must pass with zero retransmissions. Full-duplex tests
-(5-7) should be faster. If short on time, tests 1, 2, and 6 are the minimum
-(both baud rates half-duplex + one full-duplex).
+All tests must pass with zero retransmissions. If short on time, tests 2, 6 are the
+minimum (1200 baud half-duplex + full-duplex).
 
 ## Session Close Protocol
 
@@ -169,8 +170,8 @@ PY="/mnt/c/Users/John/modumb/.venv/Scripts/python.exe"
 $PY -m pytest tests/ -v
 
 # 2. VAC e2e smoke tests (if any modem/datalink/transport/HTTP/proxy code changed)
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex half
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
-$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex full
 ```
 
 Both must pass before committing. If only docs/tests/config changed, skip e2e.
