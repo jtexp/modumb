@@ -396,6 +396,13 @@ class AudioInterface:
         # conflicts when multiple modem instances run simultaneously)
         self._output_stream.write(samples_f32.reshape(-1, 1))
 
+        # Flush: write one block of silence to ensure all prior samples
+        # have been consumed by the audio hardware.  Pa_WriteStream may
+        # return once data fits in the ring buffer, before playback
+        # finishes, so this forces a drain.
+        drain = np.zeros((self.blocksize, 1), dtype=np.float32)
+        self._output_stream.write(drain)
+
         # Echo suppression: record end time, clear any echo that snuck through
         self._transmitting = False
         self._last_tx_end = time.time()

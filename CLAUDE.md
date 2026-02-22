@@ -105,6 +105,30 @@ Preamble (16 × 0xAA) | Sync (0x7E 0x7E) | Type (1B) | Seq (1B) | Len (1B) | Pay
 
 Frame types: DATA, ACK, NAK, SYN, SYN-ACK, FIN, RST.
 
+## Issue Tracking
+
+We use `bd` (beads) for lightweight issue tracking with dependency support.
+
+```bash
+# List open issues
+bd list
+
+# Create an issue
+bd create -t "Title" -b "Description"
+
+# Show issue details
+bd show <ID>
+
+# Close an issue
+bd close <ID> -r "reason"
+
+# List ready work (open, no active blockers)
+bd ready
+
+# Add a comment
+bd comments <ID> add "comment text"
+```
+
 ## Platform Notes
 
 - **Windows**: Works out of the box with sounddevice

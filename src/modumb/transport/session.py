@@ -103,6 +103,14 @@ class Session:
                 # Reset transport sequence numbers
                 self.transport.reset()
 
+                # Allow the remote side time to process our ACK and
+                # transition to ESTABLISHED before we start sending
+                # DATA.  Without this, the first DATA frame arrives
+                # while the remote is still receiving/decoding the ACK
+                # and may be captured as one audio blob, causing a
+                # decode failure and a costly ARQ retry.
+                time.sleep(0.5)
+
                 return True
 
             self.state = SessionState.CLOSED

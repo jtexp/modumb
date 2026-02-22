@@ -41,10 +41,13 @@ VAC2_INPUT = 5    # Line 2 (Virtual Cable 2)
 PROXY_HOST = '127.0.0.1'
 PROXY_PORT = 8080
 MODE = 'cable'
-TIMEOUT = 120  # seconds total
 
-TEST_URL = 'http://example.com'
-EXPECTED_CONTENT = 'Example Domain'
+# Test cases: (url, expected_content_substring, timeout_seconds)
+TESTS = {
+    'small': ('http://example.com', 'Example Domain', 120),
+    'medium': ('http://info.cern.ch', 'http://info.cern.ch', 300),
+}
+DEFAULT_TEST = 'small'
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,7 +80,53 @@ def kill_proc(proc, name):
 # Main
 # ---------------------------------------------------------------------------
 
+def run_test(test_url, expected_content, timeout, proxy_host, proxy_port):
+    """Send a request through the proxy and check the result."""
+    print(f'\nSending GET {test_url} through proxy...', flush=True)
+    request_start = time.time()
+
+    proxy_handler = urllib.request.ProxyHandler({
+        'http': f'http://{proxy_host}:{proxy_port}',
+    })
+    opener = urllib.request.build_opener(proxy_handler)
+
+    try:
+        resp = opener.open(test_url, timeout=timeout)
+        body = resp.read().decode('utf-8', errors='replace')
+        status = resp.status
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='replace')
+        status = e.code
+    except Exception as e:
+        print(f'FAIL: Request failed: {e}', flush=True)
+        return False
+
+    request_time = time.time() - request_start
+    print(f'Response: {status} ({len(body)} bytes, {request_time:.1f}s)', flush=True)
+    bps = len(body) / request_time if request_time > 0 else 0
+    print(f'Effective throughput: {bps:.1f} bytes/sec', flush=True)
+
+    if status == 200 and expected_content in body:
+        print(f'PASS: {test_url}', flush=True)
+        return True
+    else:
+        print(f'FAIL: Unexpected response', flush=True)
+        print(f'  Status: {status}', flush=True)
+        print(f'  Contains "{expected_content}": {expected_content in body}', flush=True)
+        print(f'  Body (first 500 chars): {body[:500]}', flush=True)
+        return False
+
+
 def main():
+    # Parse optional test name from argv
+    test_name = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TEST
+    if test_name not in TESTS:
+        print(f'Unknown test: {test_name}. Available: {", ".join(TESTS)}', flush=True)
+        return 1
+
+    test_url, expected_content, timeout = TESTS[test_name]
+    print(f'=== E2E Proxy Test: {test_name} ({test_url}) ===', flush=True)
+
     relay_proc = None
     proxy_proc = None
     start_time = time.time()
@@ -97,7 +146,6 @@ def main():
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
-        # Give relay time to open audio devices and start listening
         time.sleep(3)
         if relay_proc.poll() is not None:
             print(f'FAIL: Relay exited early (code={relay_proc.returncode})', flush=True)
@@ -126,42 +174,13 @@ def main():
             return 1
         print(f'Proxy is listening on {PROXY_HOST}:{PROXY_PORT}', flush=True)
 
-        # ---- Send test request through proxy ----
-        print(f'Sending GET {TEST_URL} through proxy...', flush=True)
-        request_start = time.time()
+        # ---- Run the test ----
+        passed = run_test(test_url, expected_content, timeout,
+                          PROXY_HOST, PROXY_PORT)
 
-        proxy_handler = urllib.request.ProxyHandler({
-            'http': f'http://{PROXY_HOST}:{PROXY_PORT}',
-        })
-        opener = urllib.request.build_opener(proxy_handler)
-
-        try:
-            resp = opener.open(TEST_URL, timeout=TIMEOUT)
-            body = resp.read().decode('utf-8', errors='replace')
-            status = resp.status
-        except urllib.error.HTTPError as e:
-            body = e.read().decode('utf-8', errors='replace')
-            status = e.code
-        except Exception as e:
-            print(f'FAIL: Request failed: {e}', flush=True)
-            return 1
-
-        request_time = time.time() - request_start
         total_time = time.time() - start_time
-
-        # ---- Check result ----
-        print(f'Response: {status} ({len(body)} bytes, {request_time:.1f}s)', flush=True)
-
-        if status == 200 and EXPECTED_CONTENT in body:
-            print(f'\nPASS: End-to-end proxy test through VB-Cable succeeded!', flush=True)
-            print(f'Total time: {total_time:.1f}s', flush=True)
-            return 0
-        else:
-            print(f'\nFAIL: Unexpected response', flush=True)
-            print(f'  Status: {status}', flush=True)
-            print(f'  Contains "{EXPECTED_CONTENT}": {EXPECTED_CONTENT in body}', flush=True)
-            print(f'  Body (first 500 chars): {body[:500]}', flush=True)
-            return 1
+        print(f'\nTotal time: {total_time:.1f}s', flush=True)
+        return 0 if passed else 1
 
     except KeyboardInterrupt:
         print('\nInterrupted by user', flush=True)
