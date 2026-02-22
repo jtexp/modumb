@@ -52,21 +52,21 @@ All source is under `src/modumb/`. Each layer's `__init__.py` uses `__getattr__`
 ## Data Flow
 
 ```
-Browser → LocalProxy(:8080) → modem session → RemoteRelay → urllib → Internet
-                              ← modem session ←            ← response
+Browser -> LocalProxy(:8080) -> modem session -> RemoteRelay -> urllib -> Internet
+                              <- modem session <-             <- response
 ```
 
 1. Browser sends `GET http://example.com/path` to LocalProxy on localhost:8080
 2. LocalProxy forwards the full HTTP request over the modem session via HttpClient
 3. RemoteRelay receives it via HttpServer, fetches from the real internet via `urllib`
-4. Response flows back: RemoteRelay → modem → LocalProxy → browser
+4. Response flows back: RemoteRelay -> modem -> LocalProxy -> browser
 
 ## Entry Points
 
 Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrappers in `bin/`:
-- **modem-proxy** → `modumb.proxy.local_proxy:main` — Machine A local HTTP proxy
-- **modem-relay** → `modumb.proxy.remote_proxy:main` — Machine B internet relay
-- **modem-audio** → `modumb.cli:main` — audio device listing and testing (`devices`, `test`)
+- **modem-proxy** -> `modumb.proxy.local_proxy:main` -- Machine A local HTTP proxy
+- **modem-relay** -> `modumb.proxy.remote_proxy:main` -- Machine B internet relay
+- **modem-audio** -> `modumb.cli:main` -- audio device listing and testing (`devices`, `test`)
 
 ## Key Environment Variables
 
@@ -76,34 +76,68 @@ Three CLI commands defined in `pyproject.toml [project.scripts]` with shell wrap
 | `MODEM_LOOPBACK` | `1` to bypass real audio (uses in-memory buffer) |
 | `MODEM_AUDIBLE` | Play audio even in loopback mode |
 | `MODEM_INPUT_DEVICE` / `MODEM_OUTPUT_DEVICE` | Audio device indices |
-| `MODEM_TX_VOLUME` | Transmit volume 0.0–1.0 (overrides profile default) |
+| `MODEM_TX_VOLUME` | Transmit volume 0.0-1.0 (overrides profile default) |
 | `PULSE_SERVER` | PulseAudio server address for WSL2 |
 
 ## Audio Profiles
 
 | Profile | tx_volume | echo_guard | lead_silence | hdmi_wake | Use case |
 |---------|-----------|------------|--------------|-----------|----------|
-| `acoustic` | 0.08 | 80ms | 300ms | yes | Speaker → microphone |
-| `cable` | 0.5 | 0 | 100ms | no | 3.5mm audio cable |
+| `acoustic` | 0.08 | 80ms | 300ms | yes | Speaker -> microphone |
+| `cable` | 0.5 | 0 | 100ms | no | 3.5mm audio cable or virtual cable |
 | `loopback` | 1.0 | 0 | 0 | no | In-memory testing |
 
 ## Critical Parameters
 
 - **Mark/Space frequencies**: 1200 Hz / 2200 Hz (Bell 202 style)
 - **Baud rate**: 300
-- **Sample rate**: 48000 Hz (auto-adjusts to device native rate)
+- **Sample rate**: 48000 Hz (preferred; auto-falls back to device native rate)
 - **Max frame payload**: 64 bytes (larger causes bit errors from clock drift)
 - **ARQ timeout**: 5 seconds
 - **Echo guard**: 80ms post-TX silence (acoustic mode, half-duplex)
 - **Filter bandwidth**: 400 Hz (tuned for clock drift tolerance)
+- **Post-handshake delay**: 0.5s (lets remote side process ACK before DATA)
 
 ## Frame Format
 
 ```
-Preamble (16 × 0xAA) | Sync (0x7E 0x7E) | Type (1B) | Seq (1B) | Len (1B) | Payload | CRC-16 (2B)
+Preamble (16 x 0xAA) | Sync (0x7E 0x7E) | Type (1B) | Seq (2B LE) | Len (2B LE) | Payload | CRC-16 (2B LE)
 ```
 
 Frame types: DATA, ACK, NAK, SYN, SYN-ACK, FIN, RST.
+
+## Audio I/O Design
+
+- **Input**: per-device `sd.InputStream` with callback, queues blocks to `_rx_queue`
+- **Output**: per-device `sd.OutputStream` with blocking `write()` + silence drain
+- Each modem instance has independent streams (no global `sd.play()` state conflicts)
+- `receive_until_silence()` requires 3 consecutive blocks (~64ms) above threshold before confirming signal (filters cable glitches)
+- Demodulator tries 3 strategies (envelope, DFT with clock recovery, simple DFT) and picks the best-scoring one
+
+## Virtual Audio Cable Testing (Windows)
+
+For e2e testing on a single Windows machine, use two Virtual Audio Cable (Muzychenko) cables:
+
+```
+Proxy TX -> VAC Cable 1 Out (dev 11) ---> VAC Cable 1 In (dev 3) -> Relay RX
+Proxy RX <- VAC Cable 2 In  (dev 5)  <--- VAC Cable 2 Out (dev 8) <- Relay TX
+```
+
+Device indices may vary by system -- use `modem-audio devices` to discover them.
+
+### Test scripts
+
+```bash
+# E2e proxy test (small = example.com, medium = info.cern.ch)
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small
+$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" medium
+
+# Modem-to-modem frame exchange diagnostic
+$PY "C:/Users/John/modumb/scripts/diag_modem_exchange.py"
+
+# Single-cable frame roundtrip diagnostic
+$PY "C:/Users/John/modumb/scripts/diag_vac_frame.py"
+```
 
 ## Issue Tracking
 
@@ -113,17 +147,17 @@ We use `bd` (beads) for lightweight issue tracking with dependency support.
 # List open issues
 bd list
 
+# Show ready work (open, no active blockers)
+bd ready
+
 # Create an issue
-bd create -t "Title" -b "Description"
+bd create "Title" -d "Description" -t bug -p 2
 
 # Show issue details
 bd show <ID>
 
 # Close an issue
 bd close <ID> -r "reason"
-
-# List ready work (open, no active blockers)
-bd ready
 
 # Add a comment
 bd comments <ID> add "comment text"
