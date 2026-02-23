@@ -43,10 +43,10 @@ pipeline {
             }
             steps {
                 lock('vac-audio-devices') {
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 1200'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py https --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
                 }
             }
         }
@@ -57,15 +57,15 @@ pipeline {
             }
             steps {
                 lock('vac-audio-devices') {
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 300 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py medium --baud-rate 300 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py medium --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 300'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py small --baud-rate 1200'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py medium --baud-rate 1200'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% C:/Users/John/modumb/scripts/test_e2e_vac.py https --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 300 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 300 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 300'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
                 }
             }
         }
