@@ -162,6 +162,10 @@ class ReliableTransport:
                 if response.frame_type == FrameType.RST:
                     return False
 
+                if response.frame_type == FrameType.FIN:
+                    self.framer.send_ack(response.sequence)
+                    return False
+
                 if response.frame_type == FrameType.DATA:
                     payload = self._handle_data_frame(response)
                     if payload is not None:
