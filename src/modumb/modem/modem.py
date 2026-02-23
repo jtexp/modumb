@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 # Timing constants
 TURNAROUND_DELAY = 0.05  # 50ms delay for half-duplex turnaround
 
+# Noise probe signal threshold: if the 1024-sample noise probe has
+# RMS above this, it likely captured AFSK signal rather than ambient
+# noise.  The samples are put back so receive_until_silence() can
+# use them (otherwise the frame preamble is lost).
+NOISE_SIGNAL_THRESHOLD = 0.05
+
 
 class Modem:
     """High-level modem interface for sending and receiving bytes."""
@@ -184,7 +190,18 @@ class Modem:
             # higher noise floors than typical mics)
             noise_sample = self.audio.receive(1024, timeout=0.1)
             noise_rms = float(np.sqrt(np.mean(noise_sample ** 2))) if len(noise_sample) > 0 else 0.01
-            silence_threshold = max(0.01, noise_rms * 3)
+            # Cap threshold: if the noise probe captures AFSK signal
+            # (race between clear_receive_buffer and incoming frame),
+            # noise_rms can spike above 0.2, making the threshold so
+            # high that receive_until_silence never detects signal.
+            silence_threshold = max(0.01, min(0.05, noise_rms * 3))
+
+            # If the noise probe captured actual signal (not noise),
+            # put the samples back into the audio queue so
+            # receive_until_silence() can use them. Without this, the
+            # frame preamble is lost and demodulation fails.
+            if noise_rms > NOISE_SIGNAL_THRESHOLD and len(noise_sample) > 0:
+                self.audio._rx_queue.put(noise_sample)
 
             samples = self.audio.receive_until_silence(
                 timeout=timeout,
@@ -196,6 +213,12 @@ class Modem:
             if len(samples) == 0:
                 return b''
 
+            import sys
+            duration_ms = len(samples) / self.sample_rate * 1000
+            print(f'MODEM RX: noise_rms={noise_rms:.4f} threshold={silence_threshold:.4f} '
+                  f'captured={len(samples)} samples ({duration_ms:.0f}ms)',
+                  file=sys.stderr, flush=True)
+
             # Trim leading silence before demodulation.
             # receive_until_silence() collects all audio blocks including
             # pre-signal silence, which dilutes the demodulator's RMS
@@ -204,6 +227,9 @@ class Modem:
 
             # Demodulate to bytes
             data = self.demodulator.demodulate(samples)
+
+            print(f'MODEM RX: demodulated={len(data)} bytes',
+                  file=sys.stderr, flush=True)
 
             return data
 

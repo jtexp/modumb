@@ -195,6 +195,15 @@ class ReliableTransport:
                     received_data.extend(frame.payload)
                     self._rx_seq = (self._rx_seq + 1) & 0xFFFF
 
+                    # Half-duplex: delay before ACK to widen the gap
+                    # between the sender's last TX and its next TX.
+                    # Without this, tunnel exchanges race: the sender
+                    # fires its next DATA before the receiver has
+                    # re-entered modem.receive() (noise measurement
+                    # window), causing demodulation failures at ~seq 8.
+                    if not self.full_duplex:
+                        time.sleep(TURNAROUND_GUARD)
+
                     # Send ACK
                     self.framer.send_ack(frame.sequence)
 
