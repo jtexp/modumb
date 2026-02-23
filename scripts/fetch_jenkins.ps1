@@ -63,7 +63,7 @@ if ($action -eq "run") {
         Write-Host "  Presets: smoke, full, none"
         Write-Host "  IDs: small-300-half, small-1200-half, medium-300-half, medium-1200-half,"
         Write-Host "       small-300-full, small-1200-full, medium-1200-full,"
-        Write-Host "       https-300-full"
+        Write-Host "       https-1200-full"
         exit 1
     }
     $runBranch = if ($args[2]) { $args[2] } else { "master" }
