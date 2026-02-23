@@ -4,6 +4,7 @@ Handles the transmission and reception of frames over the modem,
 including preamble detection and frame synchronization.
 """
 
+import os
 import threading
 import queue
 import time
@@ -111,6 +112,24 @@ class Framer:
             return frame
 
         print(f'DEBUG FRAMER: Failed to decode {len(data)} bytes: {data[:50].hex()}...', file=sys.stderr, flush=True)
+
+        # Dump raw audio to WAV for post-mortem analysis
+        if os.environ.get('MODEM_WAV_DUMP') and self.modem._last_rx_samples is not None:
+            try:
+                import numpy as np
+                from scipy.io import wavfile
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                path = f'modem_rx_fail_{ts}.wav'
+                raw = self.modem._last_rx_samples
+                # Scale float32 [-1,1] to int16 for WAV compatibility
+                wavfile.write(path, self.modem.sample_rate,
+                              (raw * 32767).astype(np.int16))
+                print(f'DEBUG FRAMER: WAV dump -> {path} ({len(raw)} samples)',
+                      file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f'DEBUG FRAMER: WAV dump failed: {e}',
+                      file=sys.stderr, flush=True)
+
         return None
 
     def _extract_frames(self, data: bytes) -> list[Frame]:

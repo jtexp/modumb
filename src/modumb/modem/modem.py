@@ -132,6 +132,7 @@ class Modem:
         else:
             self._lock = threading.Lock()
         self._rx_callback: Optional[Callable[[bytes], None]] = None
+        self._last_rx_samples: Optional[np.ndarray] = None  # for WAV dump on decode failure
 
     def start(self) -> None:
         """Start the modem."""
@@ -148,7 +149,10 @@ class Modem:
             data: Bytes to send
             blocking: If True, wait until transmission complete
         """
+        import sys
         with self._lock:
+            tx_start = time.monotonic()
+
             # Modulate data to audio samples
             samples = self.modulator.modulate(data)
 
@@ -165,6 +169,10 @@ class Modem:
             # Transmit
             self.audio.transmit(samples, blocking=blocking)
 
+            tx_elapsed = (time.monotonic() - tx_start) * 1000
+            print(f'MODEM TX: {len(data)}B tx_time={tx_elapsed:.0f}ms',
+                  file=sys.stderr, flush=True)
+
             if blocking and not self.full_duplex:
                 # Half-duplex turnaround delay
                 time.sleep(TURNAROUND_DELAY)
@@ -179,6 +187,9 @@ class Modem:
             Received bytes, or empty bytes on timeout
         """
         with self._lock:
+            import sys
+            rx_start = time.monotonic()
+
             # Drain any stale audio that accumulated in the receive queue
             # while we weren't actively listening (not needed in full-duplex
             # where RX runs independently of TX).
@@ -196,11 +207,13 @@ class Modem:
             # high that receive_until_silence never detects signal.
             silence_threshold = max(0.01, min(0.05, noise_rms * 3))
 
-            # If the noise probe captured actual signal (not noise),
-            # put the samples back into the audio queue so
-            # receive_until_silence() can use them. Without this, the
-            # frame preamble is lost and demodulation fails.
-            if noise_rms > NOISE_SIGNAL_THRESHOLD and len(noise_sample) > 0:
+            # Always put noise-probe samples back so
+            # receive_until_silence() gets the complete capture.
+            # Previously we only re-queued when noise_rms exceeded the
+            # signal threshold, but in full-duplex the probe can land on
+            # lead silence of an incoming frame — discarding those samples
+            # shifts the demodulator's view and corrupts the preamble.
+            if len(noise_sample) > 0:
                 self.audio._rx_queue.put(noise_sample)
 
             samples = self.audio.receive_until_silence(
@@ -213,11 +226,15 @@ class Modem:
             if len(samples) == 0:
                 return b''
 
-            import sys
+            signal_ms = (time.monotonic() - rx_start) * 1000
             duration_ms = len(samples) / self.sample_rate * 1000
             print(f'MODEM RX: noise_rms={noise_rms:.4f} threshold={silence_threshold:.4f} '
-                  f'captured={len(samples)} samples ({duration_ms:.0f}ms)',
+                  f'captured={len(samples)} samples ({duration_ms:.0f}ms) '
+                  f'wait={signal_ms:.0f}ms',
                   file=sys.stderr, flush=True)
+
+            # Store raw samples for WAV dump on decode failure
+            self._last_rx_samples = samples.copy()
 
             # Trim leading silence before demodulation.
             # receive_until_silence() collects all audio blocks including
@@ -256,8 +273,10 @@ class Modem:
         if len(above) == 0:
             return samples
 
-        # Keep margin before signal start for bandpass filter settling
-        margin = spb * 8  # 8 bit periods
+        # Keep margin before signal start for bandpass filter settling.
+        # 16 bit periods (13.3ms@1200, 53ms@300) absorbs timing jitter
+        # from concurrent full-duplex I/O that can corrupt the preamble.
+        margin = spb * 16  # 16 bit periods
         start = max(0, int(above[0]) - margin)
 
         return samples[start:]

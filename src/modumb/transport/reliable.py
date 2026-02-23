@@ -22,7 +22,7 @@ DEFAULT_RETRIES = 5         # Maximum retransmission attempts
 DEFAULT_FRAGMENT_SIZE = MAX_PAYLOAD_SIZE  # Maximum fragment size
 TURNAROUND_GUARD = 0.1      # Wait time after receiving before sending (echo guard)
 FULL_DUPLEX_GUARD = 0.02    # Small pacing gap to avoid ACK+DATA burst collapse
-FULL_DUPLEX_ACK_GUARD = 0.03  # Gap after ACK before next outbound DATA
+FULL_DUPLEX_ACK_GUARD = 0.15  # Gap after ACK before next outbound DATA (150ms > silence_duration threshold)
 
 
 @dataclass
