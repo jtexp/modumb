@@ -253,14 +253,7 @@ PowerShell helper for Jenkins API operations. Run from WSL2 via `powershell.exe`
 ```bash
 PS=scripts/fetch_jenkins.ps1
 
-# Scan repo and wait for Jenkins to build the current commit (normal workflow)
-commit=$(git rev-parse HEAD)
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan master 60 $commit
-
-# Scan without commit check (just trigger scan, wait for any new build)
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan
-
-# Run specific E2E tests by ID or preset
+# Run specific E2E tests by ID or preset (normal workflow — always trigger manually)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run small-1200-half
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run small-1200-half,medium-300-half
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run smoke
@@ -281,14 +274,17 @@ powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS status mas
 # Fetch console log for a specific or latest build
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS lastBuild master
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS 3 master
+
+# Scan repo (branch discovery only — does NOT reliably trigger builds)
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan
 ```
 
 **Actions**:
-- `scan [branch] [timeout] [commit]` — Rescan repo. If `commit` given, checks whether it's already built (exits early if so). Otherwise waits up to `timeout` seconds for a new build. Reports build number for use with `poll`. **This is the default way to kick off builds.**
-- `run <tests> [branch]` — Run specific E2E tests. `<tests>` is comma-separated IDs (e.g. `small-1200-half,medium-300-half`) or a preset (`smoke`, `full`, `none`). Posts `E2E_TESTS=<tests>` via `buildWithParameters`. Resolves to build number.
-- `trigger [branch]` — Force a parameterized build (`E2E_TESTS=full`). Resolves the queue item to a build number. **Only use when explicitly needed.**
+- `run <tests> [branch]` — **Primary way to trigger builds.** `<tests>` is comma-separated IDs (e.g. `small-1200-half,medium-300-half`) or a preset (`smoke`, `full`, `none`). Posts `E2E_TESTS=<tests>` via `buildWithParameters`. Resolves to build number. Always use `run` to kick off builds — it triggers immediately and reliably.
+- `trigger [branch]` — Force a parameterized build (`E2E_TESTS=full`). Resolves the queue item to a build number. Use for full matrix runs.
 - `poll [branch] [interval] [buildNum]` — Poll until build finishes, then print full console log. Shows Git commit SHA when available. Pins to a specific build number after first check.
 - `status [branch]` — One-shot status with commit SHA (truncated to 10 chars).
+- `scan [branch] [timeout] [commit]` — Rescan repo for branch discovery only. Does **not** reliably trigger builds — use `run` instead.
 - `<buildNum> [branch]` / `lastBuild [branch]` — Fetch console text.
 
 **E2E_TESTS parameter** (replaces old `RUN_FULL_MATRIX` boolean):
@@ -313,7 +309,8 @@ request and the subsequent POST. `fetch_jenkins.ps1` handles this automatically.
 | Crumb | `GET /crumbIssuer/api/json` | Returns `crumbRequestField` and `crumb`. Must be used within the same HTTP session. |
 
 **Common gotchas**:
-- Always pass the expected commit SHA to `scan` so it can verify the right commit is built (or skip if already built).
+- Always use `run` (not `scan`) to trigger builds. `scan` only does branch discovery and does not reliably start builds.
+- `run` returns a build number — pass it to `poll` to track that specific build.
 - `poll` with `lastBuild` may return a different build than the one you just triggered (e.g., an auto-scan build). Pass a specific build number to avoid this.
 - After triggering a scan, the auto-discovered branches may immediately start building, creating extra builds.
 - Auth uses API token (not password): `john:<api-token>` base64-encoded in `Authorization: Basic` header.
