@@ -277,13 +277,19 @@ class AudioInterface:
             if self._running:
                 return
 
-            # Create input stream for receiving
+            # Create input stream for receiving.
+            # Use high latency to give PortAudio a larger internal buffer
+            # (~100ms = ~4800 samples at 48kHz). During full-duplex I/O
+            # the input callback competes for the GIL with the blocking
+            # output write; extra buffer absorbs callback delays and
+            # prevents zero-filled dropout gaps in the captured audio.
             self._input_stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 blocksize=self.blocksize,
                 device=self.input_device,
                 dtype=np.float32,
+                latency='high',
                 callback=self._input_callback,
             )
 
