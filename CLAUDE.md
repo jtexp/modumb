@@ -204,6 +204,42 @@ bd close <ID> -r "reason"
 bd comments <ID> add "comment text"
 ```
 
+## Jenkins CI
+
+Jenkins runs locally at http://localhost:8090 as a desktop app (not a service) so it can access Virtual Audio Cable devices for E2E tests. The `modumb` Multibranch Pipeline job scans the local repo at `C:\Users\John\modumb`.
+
+### Checking build results
+
+Use the PowerShell helper `fetch_jenkins.ps1` from WSL2 (localhost isn't reachable from WSL2 directly, but `powershell.exe` runs on the Windows side):
+
+```bash
+# Poll a running build every 15s, print full log when done
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 poll worktree-cicd 15
+
+# One-shot status check
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 status worktree-cicd
+
+# Fetch console log for a specific or latest build
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 lastBuild worktree-cicd
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 3 worktree-cicd
+
+# Trigger a build with RUN_FULL_MATRIX=true
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 trigger worktree-cicd
+```
+
+The second argument is the branch name (defaults to `worktree-cicd`). Use `poll` in the background whenever waiting for a build to finish.
+
+### Key Jenkins config
+
+| Item | Value |
+|------|-------|
+| URL | http://localhost:8090 |
+| Job | `modumb` (Multibranch Pipeline, local Git source) |
+| Lock | `vac-audio-devices` (serializes E2E tests) |
+| Node label | `windows-audio` (Built-In Node) |
+| Java flag | `-Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true` (required for local repo) |
+| Start command | `java "-Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true" -jar C:\Jenkins\jenkins.war --httpPort=8090` |
+
 ## Platform Notes
 
 - **Windows**: Works out of the box with sounddevice
