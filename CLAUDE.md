@@ -227,11 +227,15 @@ PowerShell helper for Jenkins API operations. Run from WSL2 via `powershell.exe`
 ```bash
 PS=scripts/fetch_jenkins.ps1
 
-# Trigger a build with RUN_FULL_MATRIX=true
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS trigger master
+# Scan repo and wait for Jenkins to build the current commit (normal workflow)
+commit=$(git rev-parse HEAD)
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan master 60 $commit
 
-# Scan for new branches (discovers new Jenkinsfiles)
+# Scan without commit check (just trigger scan, wait for any new build)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan
+
+# Force-trigger a build with RUN_FULL_MATRIX=true (explicit only)
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS trigger master
 
 # Poll a running build every 15s, print full log when done
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll master 15
@@ -239,7 +243,7 @@ powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll maste
 # Poll a specific build number (not lastBuild)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll master 15 2
 
-# One-shot status check
+# One-shot status check (shows commit SHA)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS status master
 
 # Fetch console log for a specific or latest build
@@ -247,7 +251,12 @@ powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS lastBuild 
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS 3 master
 ```
 
-Arguments: `<action> [branch=master] [interval] [buildNum]`.
+**Actions**:
+- `scan [branch] [timeout] [commit]` — Rescan repo. If `commit` given, checks whether it's already built (exits early if so). Otherwise waits up to `timeout` seconds for a new build. Reports build number for use with `poll`. **This is the default way to kick off builds.**
+- `trigger [branch]` — Force a parameterized build (`RUN_FULL_MATRIX=true`). Resolves the queue item to a build number. **Only use when explicitly needed.**
+- `poll [branch] [interval] [buildNum]` — Poll until build finishes, then print full console log. Shows Git commit SHA when available. Pins to a specific build number after first check.
+- `status [branch]` — One-shot status with commit SHA (truncated to 10 chars).
+- `<buildNum> [branch]` / `lastBuild [branch]` — Fetch console text.
 
 ### Jenkins API notes
 
@@ -266,6 +275,7 @@ request and the subsequent POST. `fetch_jenkins.ps1` handles this automatically.
 | Crumb | `GET /crumbIssuer/api/json` | Returns `crumbRequestField` and `crumb`. Must be used within the same HTTP session. |
 
 **Common gotchas**:
+- Always pass the expected commit SHA to `scan` so it can verify the right commit is built (or skip if already built).
 - `poll` with `lastBuild` may return a different build than the one you just triggered (e.g., an auto-scan build). Pass a specific build number to avoid this.
 - After triggering a scan, the auto-discovered branches may immediately start building, creating extra builds.
 - Auth uses API token (not password): `john:<api-token>` base64-encoded in `Authorization: Basic` header.
