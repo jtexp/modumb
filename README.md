@@ -183,7 +183,7 @@ python scripts/test_e2e_vac.py medium
 
 - **Slow** -- 300/1200 baud with stop-and-wait ARQ, best for small pages and API responses
 - **Max response** -- 1MB default (configurable via `--max-response-size`)
-- **HTTPS** -- CONNECT tunneling is implemented but has a known issue with TLS handshakes failing on long sessions over Virtual Audio Cable (works over real audio cables)
+- **HTTPS** -- CONNECT tunneling is implemented but has a known issue with TLS handshakes failing after ~10 frames due to a TX/RX collision bug
 
 ## License
 
