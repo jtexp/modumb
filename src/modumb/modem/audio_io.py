@@ -516,11 +516,11 @@ class AudioInterface:
                     if rms < threshold:
                         break
 
-        if not samples:
+        if not samples or not signal_detected:
             return np.zeros(0, dtype=np.float32)
 
         # Discard pre-signal silence to avoid feeding garbage to demodulator
-        if signal_detected and signal_start_idx > 0:
+        if signal_start_idx > 0:
             samples = samples[signal_start_idx:]
 
         return np.concatenate(samples)

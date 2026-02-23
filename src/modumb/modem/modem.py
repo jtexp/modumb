@@ -184,7 +184,7 @@ class Modem:
             # higher noise floors than typical mics)
             noise_sample = self.audio.receive(1024, timeout=0.1)
             noise_rms = float(np.sqrt(np.mean(noise_sample ** 2))) if len(noise_sample) > 0 else 0.01
-            silence_threshold = max(0.01, noise_rms * 3)
+            silence_threshold = max(0.01, min(0.05, noise_rms * 3))
 
             samples = self.audio.receive_until_silence(
                 timeout=timeout,
