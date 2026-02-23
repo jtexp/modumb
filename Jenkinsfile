@@ -9,6 +9,7 @@ pipeline {
     environment {
         MODUMB_PYTHON = 'C:\\Users\\John\\modumb\\.venv\\Scripts\\python.exe'
         PYTHONPATH    = "${WORKSPACE}\\src"
+        MODEM_WAV_DUMP = '1'
     }
 
     stages {
@@ -103,6 +104,7 @@ pipeline {
     post {
         always {
             junit allowEmptyResults: true, testResults: 'reports/*.xml'
+            archiveArtifacts allowEmptyArchive: true, artifacts: 'modem_rx_fail_*.wav'
             cleanWs()
         }
     }
