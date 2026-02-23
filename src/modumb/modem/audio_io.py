@@ -340,17 +340,20 @@ class AudioInterface:
                 return
             if time.time() < self._last_tx_end + self._echo_guard_time:
                 return
-        elif self._transmitting:
-            # Full-duplex: the VAC driver delivers zero blocks during
-            # concurrent TX/RX on two cables.  Drop them so they don't
-            # create a gap that corrupts demodulation.  Real signal
-            # blocks (non-zero) are kept.
-            block = indata.flatten()
-            if float(np.max(np.abs(block))) < 0.001:
-                return
 
-        # Copy data to queue
-        self._rx_queue.put(indata.copy().flatten())
+        # The Muzychenko VAC driver occasionally delivers blocks of
+        # exact zeros during or shortly after concurrent I/O on two
+        # cables.  Replace them with low-level noise so:
+        #   - receive_until_silence() still detects silence (RMS ≈ 0.0003)
+        #   - sample count is preserved (no gap in bit alignment)
+        #   - demodulator sees noise, not a phase-breaking zero run
+        block = indata.copy().flatten()
+        if float(np.max(np.abs(block))) < 0.001:
+            block = np.random.uniform(
+                -0.0005, 0.0005, len(block)
+            ).astype(np.float32)
+
+        self._rx_queue.put(block)
 
     def clear_receive_buffer(self) -> None:
         """Clear the receive buffer (discard any pending audio)."""
