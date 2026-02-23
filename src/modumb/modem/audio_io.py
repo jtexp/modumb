@@ -334,12 +334,19 @@ class AudioInterface:
             print(f'AUDIO RX: callback status={status}',
                   file=sys.stderr, flush=True)
 
-        # Echo suppression: ignore audio during transmission and guard period
-        # (skipped in full-duplex: no echo on cable/loopback)
         if not self.full_duplex:
+            # Half-duplex: suppress all input during TX and echo guard
             if self._transmitting:
                 return
             if time.time() < self._last_tx_end + self._echo_guard_time:
+                return
+        elif self._transmitting:
+            # Full-duplex: the VAC driver delivers zero blocks during
+            # concurrent TX/RX on two cables.  Drop them so they don't
+            # create a gap that corrupts demodulation.  Real signal
+            # blocks (non-zero) are kept.
+            block = indata.flatten()
+            if float(np.max(np.abs(block))) < 0.001:
                 return
 
         # Copy data to queue
@@ -401,10 +408,10 @@ class AudioInterface:
         # Wake up HDMI device if needed (Intel HDMI sleep bug workaround)
         self.wake_up_output()
 
-        # Echo suppression: mark as transmitting, clear buffer
-        # (skipped in full-duplex: no echo on cable/loopback)
+        # Mark as transmitting so the input callback can filter
+        # VAC zero-blocks (full-duplex) or suppress echo (half-duplex).
+        self._transmitting = True
         if not self.full_duplex:
-            self._transmitting = True
             self.clear_receive_buffer()
 
         # Write to per-device output stream (avoids global sd.play() state
@@ -418,9 +425,9 @@ class AudioInterface:
         drain = np.zeros((self.blocksize, 1), dtype=np.float32)
         self._output_stream.write(drain)
 
+        self._transmitting = False
         if not self.full_duplex:
             # Echo suppression: record end time, clear any echo that snuck through
-            self._transmitting = False
             self._last_tx_end = time.time()
             self.clear_receive_buffer()
         self._last_output_time = time.time()  # Track for HDMI wake-up
