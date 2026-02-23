@@ -2,7 +2,7 @@
 
 import pytest
 
-from modumb.datalink.frame import Frame, FrameType, MAX_PAYLOAD_SIZE
+from modumb.datalink.frame import Frame, FrameType, MAX_PAYLOAD_SIZE, PREAMBLE, SYNC
 
 
 class TestFrame:
@@ -108,8 +108,7 @@ class TestFrame:
         encoded = bytearray(frame.encode())
 
         # Corrupt a byte in the payload area (after preamble + sync + header)
-        # Preamble=16, Sync=2, Header=5, so payload starts at 23
-        payload_start = 23
+        payload_start = len(PREAMBLE) + len(SYNC) + 5  # header = TYPE(1)+SEQ(2)+LEN(2)
         if len(encoded) > payload_start:
             encoded[payload_start] ^= 0xFF
 
