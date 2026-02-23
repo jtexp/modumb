@@ -21,6 +21,7 @@ DEFAULT_TIMEOUT = 5.0       # Timeout for ACK (seconds) - longer for 300 baud
 DEFAULT_RETRIES = 5         # Maximum retransmission attempts
 DEFAULT_FRAGMENT_SIZE = MAX_PAYLOAD_SIZE  # Maximum fragment size
 TURNAROUND_GUARD = 0.1      # Wait time after receiving before sending (echo guard)
+FULL_DUPLEX_GUARD = 0.02    # Small pacing gap to avoid ACK+DATA burst collapse
 
 
 @dataclass
@@ -122,8 +123,10 @@ class ReliableTransport:
         Returns:
             True if acknowledged, False on failure
         """
-        # Wait for receiver to be ready (echo guard period)
-        if not self.full_duplex:
+        # Wait for receiver readiness / pacing window.
+        if self.full_duplex:
+            time.sleep(FULL_DUPLEX_GUARD)
+        else:
             time.sleep(TURNAROUND_GUARD)
 
         seq = self._next_seq()
