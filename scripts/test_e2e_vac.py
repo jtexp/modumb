@@ -33,7 +33,7 @@ from vac_lock import vac_lock
 # Configuration
 # ---------------------------------------------------------------------------
 
-PY = sys.executable
+PY = os.environ.get('MODUMB_PYTHON', sys.executable)
 
 # VAC Cable 1: LocalProxy TX -> RemoteRelay RX
 VAC1_OUTPUT = 11  # Line Out (Virtual Cable 1)
