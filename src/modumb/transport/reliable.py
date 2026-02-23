@@ -19,7 +19,7 @@ from ..datalink.frame import Frame, FrameType, MAX_PAYLOAD_SIZE
 DEFAULT_TIMEOUT = 5.0       # Timeout for ACK (seconds) - longer for 300 baud
 DEFAULT_RETRIES = 5         # Maximum retransmission attempts
 DEFAULT_FRAGMENT_SIZE = MAX_PAYLOAD_SIZE  # Maximum fragment size
-TURNAROUND_GUARD = 0.2      # Half-duplex settle time; widened for HTTPS tunnel stability
+TURNAROUND_GUARD = 0.1      # Wait time after receiving before sending (echo guard)
 
 
 @dataclass
@@ -135,21 +135,27 @@ class ReliableTransport:
             if attempt > 0:
                 self.stats.retransmissions += 1
 
-            # Wait specifically for ACK(seq). In tunnel traffic the peer can
-            # send DATA quickly after ACK; matching only ACK here prevents
-            # spurious retransmit loops when non-ACK frames arrive first.
-            response = self.framer.wait_for_frame(
-                expected_type=FrameType.ACK,
-                expected_seq=seq,
-                timeout=self.timeout,
-            )
+            # Wait for ACK/NAK
+            response = self.framer.wait_for_frame(timeout=self.timeout)
 
             if response is None:
                 self.stats.timeouts += 1
                 continue
 
-            self.stats.ack_received += 1
-            return True
+            if response.frame_type == FrameType.ACK:
+                if response.sequence == seq:
+                    self.stats.ack_received += 1
+                    return True
+                # Wrong sequence, ignore
+
+            elif response.frame_type == FrameType.NAK:
+                self.stats.nak_received += 1
+                # Retransmit immediately
+                continue
+
+            elif response.frame_type == FrameType.RST:
+                # Connection reset
+                return False
 
         return False
 
