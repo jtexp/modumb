@@ -17,11 +17,10 @@ from ..transport.session import Session
 
 MAX_TUNNEL_CHUNK = 2048
 
-# Max data bytes per chunk sent over modem. Keeps each chunk to ~4 modem
-# frames (192 data + 4-byte header = 196 bytes = 4 frames at 64B payload).
-# Larger chunks cause 6+ consecutive frames in one direction which can
-# trigger audio decode failures on some VAC/cable setups.
-MODEM_CHUNK_SIZE = 192
+# Max data bytes per chunk sent over modem. Keep chunks small enough to
+# limit back-to-back frame bursts in half-duplex HTTPS tunneling.
+# 96 data + 4-byte header = 100 bytes (2 frames at 64B payload).
+MODEM_CHUNK_SIZE = 96
 
 # Sentinel value for close signal (distinct from length=0 keepalive)
 _CLOSE_SENTINEL = 0xFFFFFFFF
