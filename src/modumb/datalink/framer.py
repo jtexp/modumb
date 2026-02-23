@@ -101,13 +101,45 @@ class Framer:
             print(f'DEBUG FRAMER: No data received', file=sys.stderr, flush=True)
             return None
 
-        # Try to decode frame
-        frame = Frame.decode(data)
-        if frame:
+        # Decode one or more frames from this modem capture.
+        frames = self._extract_frames(data)
+        if frames:
+            for frame in frames[1:]:
+                self._rx_queue.put(frame)
+            frame = frames[0]
             print(f'DEBUG FRAMER: Received frame type={frame.frame_type.name} seq={frame.sequence}', file=sys.stderr, flush=True)
-        else:
-            print(f'DEBUG FRAMER: Failed to decode {len(data)} bytes: {data[:50].hex()}...', file=sys.stderr, flush=True)
-        return frame
+            return frame
+
+        print(f'DEBUG FRAMER: Failed to decode {len(data)} bytes: {data[:50].hex()}...', file=sys.stderr, flush=True)
+        return None
+
+    def _extract_frames(self, data: bytes) -> list[Frame]:
+        """Extract all decodable frames from a modem receive blob."""
+        frames: list[Frame] = []
+        seen: set[tuple[int, int, bytes]] = set()
+
+        # Fast path: a single normal frame.
+        first = Frame.decode(data)
+        if first:
+            key = (int(first.frame_type), first.sequence, first.payload)
+            seen.add(key)
+            frames.append(first)
+
+        # Multi-frame path: decode each SYNC-aligned candidate independently.
+        for i in range(len(data) - 1):
+            if data[i:i + 2] != SYNC:
+                continue
+            start = max(0, i - len(PREAMBLE))
+            frame = Frame.decode(data[start:])
+            if not frame:
+                continue
+            key = (int(frame.frame_type), frame.sequence, frame.payload)
+            if key in seen:
+                continue
+            seen.add(key)
+            frames.append(frame)
+
+        return frames
 
     def receive_frame_raw(self, timeout: float = None) -> tuple[Optional[Frame], bytes]:
         """Receive a frame and return raw bytes too.
