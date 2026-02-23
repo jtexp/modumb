@@ -236,6 +236,12 @@ class Modem:
             # Store raw samples for WAV dump on decode failure
             self._last_rx_samples = samples.copy()
 
+            # Excise zero-run gaps caused by dropped PortAudio callbacks.
+            # Concurrent TX on a different device can cause the OS scheduler
+            # to skip an input callback, leaving a 1024-sample zero gap that
+            # shifts all subsequent bit boundaries and corrupts demodulation.
+            samples = self._excise_dropout_gaps(samples)
+
             # Trim leading silence before demodulation.
             # receive_until_silence() collects all audio blocks including
             # pre-signal silence, which dilutes the demodulator's RMS
@@ -280,6 +286,68 @@ class Modem:
         start = max(0, int(above[0]) - margin)
 
         return samples[start:]
+
+    def _excise_dropout_gaps(self, samples: np.ndarray) -> np.ndarray:
+        """Remove zero-run gaps caused by dropped PortAudio input callbacks.
+
+        During concurrent full-duplex I/O, the OS scheduler may skip an
+        input callback, producing a run of ~1024 zero samples in the
+        captured audio.  This shifts all subsequent bit boundaries and
+        causes systematic demodulation failure.
+
+        Detects runs of near-zero samples (|sample| < 0.005) longer than
+        half the audio blocksize, and excises them by stitching adjacent
+        signal segments together.
+        """
+        import sys
+        min_gap = self.audio.blocksize // 2  # 512 samples at default blocksize
+        abs_s = np.abs(samples)
+
+        # Find first and last signal sample to define the signal region
+        max_amp = float(np.max(abs_s)) if len(abs_s) > 0 else 0
+        if max_amp < 0.005:
+            return samples
+
+        signal_threshold = 0.005
+        signal_mask = abs_s > signal_threshold
+        signal_indices = np.where(signal_mask)[0]
+        if len(signal_indices) < 2:
+            return samples
+
+        sig_start = signal_indices[0]
+        sig_end = signal_indices[-1]
+
+        # Scan for zero-runs within the signal region
+        gaps = []
+        i = sig_start
+        while i <= sig_end:
+            if abs_s[i] < signal_threshold:
+                gap_start = i
+                while i <= sig_end and abs_s[i] < signal_threshold:
+                    i += 1
+                gap_len = i - gap_start
+                if gap_len >= min_gap:
+                    gaps.append((gap_start, gap_len))
+            else:
+                i += 1
+
+        if not gaps:
+            return samples
+
+        total_removed = sum(g[1] for g in gaps)
+        print(f'MODEM RX: excising {len(gaps)} dropout gap(s) '
+              f'({total_removed} samples = {total_removed/self.sample_rate*1000:.1f}ms)',
+              file=sys.stderr, flush=True)
+
+        # Build stitched audio by removing gaps
+        segments = []
+        prev_end = 0
+        for gap_start, gap_len in gaps:
+            segments.append(samples[prev_end:gap_start])
+            prev_end = gap_start + gap_len
+        segments.append(samples[prev_end:])
+
+        return np.concatenate(segments)
 
     def receive_bytes(self, num_bytes: int, timeout: float = 5.0) -> bytes:
         """Receive a specific number of bytes.

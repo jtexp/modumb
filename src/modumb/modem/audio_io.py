@@ -325,7 +325,8 @@ class AudioInterface:
     ) -> None:
         """Callback for input stream - receive audio samples."""
         if status:
-            pass  # Could log status flags
+            print(f'AUDIO RX: callback status={status}',
+                  file=sys.stderr, flush=True)
 
         # Echo suppression: ignore audio during transmission and guard period
         # (skipped in full-duplex: no echo on cable/loopback)
