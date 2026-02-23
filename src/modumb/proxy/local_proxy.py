@@ -194,6 +194,8 @@ class LocalProxy:
 
                     try:
                         poll_timeout = 0.1  # Fast poll when data flowing
+                        keepalive_interval = 1.5
+                        last_keepalive = 0.0
 
                         while True:
                             # Check for browser data (bounded read)
@@ -209,7 +211,18 @@ class LocalProxy:
                                     send_close(session)
                                     break
                             else:
-                                client_data = b''  # Keepalive
+                                # Rate-limit empty probe chunks; frequent
+                                # keepalives can consume most of the modem
+                                # bandwidth during TLS handshake waits.
+                                now = time.time()
+                                if now - last_keepalive < keepalive_interval:
+                                    poll_timeout = min(
+                                        keepalive_interval - (now - last_keepalive),
+                                        0.5,
+                                    )
+                                    continue
+                                client_data = b''  # Keepalive probe
+                                last_keepalive = now
 
                             # Send to relay (data or empty keepalive)
                             if not send_chunk(session, client_data):
