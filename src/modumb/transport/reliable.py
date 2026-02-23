@@ -22,6 +22,7 @@ DEFAULT_RETRIES = 5         # Maximum retransmission attempts
 DEFAULT_FRAGMENT_SIZE = MAX_PAYLOAD_SIZE  # Maximum fragment size
 TURNAROUND_GUARD = 0.1      # Wait time after receiving before sending (echo guard)
 FULL_DUPLEX_GUARD = 0.02    # Small pacing gap to avoid ACK+DATA burst collapse
+FULL_DUPLEX_ACK_GUARD = 0.03  # Gap after ACK before next outbound DATA
 
 
 @dataclass
@@ -234,10 +235,11 @@ class ReliableTransport:
             payload = bytes(frame.payload)
             self._rx_seq = (self._rx_seq + 1) & 0xFFFF
 
-            if not self.full_duplex:
-                time.sleep(TURNAROUND_GUARD)
-
             self.framer.send_ack(frame.sequence)
+            if self.full_duplex:
+                time.sleep(FULL_DUPLEX_ACK_GUARD)
+            else:
+                time.sleep(TURNAROUND_GUARD)
             return payload
 
         if frame.sequence < self._rx_seq:
