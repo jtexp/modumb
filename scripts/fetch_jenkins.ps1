@@ -1,4 +1,9 @@
-$pair = "john:11bb5c963c3fd573d98dbff1cad0646ad4"
+$token = $env:JENKINS_API_TOKEN
+if (-not $token) {
+    Write-Error "JENKINS_API_TOKEN environment variable is not set. Set it to your Jenkins API token (Manage Jenkins > Users > john > Configure > API Token)."
+    exit 1
+}
+$pair = "john:$token"
 $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
 $base64 = [System.Convert]::ToBase64String($bytes)
 $headers = @{Authorization = "Basic $base64"}
