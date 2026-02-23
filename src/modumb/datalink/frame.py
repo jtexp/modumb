@@ -224,19 +224,10 @@ class Frame:
                 payload = corrected[5:5 + length]
                 frame_type, sequence, length = struct.unpack('<BHH', corrected[:5])
             else:
-                # Try 2-bit error correction across entire frame
-                corrected = cls._try_correct_2bit(
-                    frame_data, 5 + length)
-                if corrected is not None:
-                    content = corrected[:5 + length]
-                    payload = corrected[5:5 + length]
-                    frame_type, sequence, length = struct.unpack(
-                        '<BHH', corrected[:5])
-                else:
-                    import sys
-                    print(f'DEBUG FRAME: CRC mismatch: received=0x{received_crc:04x} computed=0x{computed_crc:04x} length={length}', file=sys.stderr, flush=True)
-                    print(f'DEBUG FRAME: Payload start: {payload[:50].hex() if len(payload) > 50 else payload.hex()}', file=sys.stderr, flush=True)
-                    return None
+                import sys
+                print(f'DEBUG FRAME: CRC mismatch: received=0x{received_crc:04x} computed=0x{computed_crc:04x} length={length}', file=sys.stderr, flush=True)
+                print(f'DEBUG FRAME: Payload start: {payload[:50].hex() if len(payload) > 50 else payload.hex()}', file=sys.stderr, flush=True)
+                return None
 
         # Validate frame type
         try:
