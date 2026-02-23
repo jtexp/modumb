@@ -71,7 +71,7 @@ if ($action -eq "run") {
     $ctx = Get-CrumbHeaders
     $resp = Invoke-WebRequest -Uri "$runUrl/buildWithParameters" -Method POST `
         -Headers $ctx.Headers -WebSession $ctx.Session `
-        -Body "json={`"parameter`":[{`"name`":`"E2E_TESTS`",`"value`":`"$tests`"}]}" `
+        -Body @{ E2E_TESTS = $tests } `
         -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
     Write-Host "Triggered build on $runBranch with E2E_TESTS=$tests (HTTP $($resp.StatusCode))"
 
@@ -91,7 +91,7 @@ if ($action -eq "run") {
     $ctx = Get-CrumbHeaders
     $resp = Invoke-WebRequest -Uri "$baseUrl/buildWithParameters" -Method POST `
         -Headers $ctx.Headers -WebSession $ctx.Session `
-        -Body "json={`"parameter`":[{`"name`":`"E2E_TESTS`",`"value`":`"full`"}]}" `
+        -Body @{ E2E_TESTS = "full" } `
         -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
     Write-Host "Triggered build on $branch with E2E_TESTS=full (HTTP $($resp.StatusCode))"
 
