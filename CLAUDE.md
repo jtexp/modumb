@@ -220,26 +220,55 @@ bd comments <ID> add "comment text"
 
 Jenkins runs locally at http://localhost:8090 as a desktop app (not a service) so it can access Virtual Audio Cable devices for E2E tests. The `modumb` Multibranch Pipeline job scans the local repo at `C:\Users\John\modumb`.
 
-### Checking build results
+### fetch_jenkins.ps1
 
-Use the PowerShell helper `fetch_jenkins.ps1` from WSL2 (localhost isn't reachable from WSL2 directly, but `powershell.exe` runs on the Windows side):
+PowerShell helper for Jenkins API operations. Run from WSL2 via `powershell.exe` (localhost isn't reachable from WSL2 directly, but `powershell.exe` runs on the Windows side):
 
 ```bash
-# Poll a running build every 15s, print full log when done
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 poll worktree-cicd 15
-
-# One-shot status check
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 status worktree-cicd
-
-# Fetch console log for a specific or latest build
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 lastBuild worktree-cicd
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 3 worktree-cicd
+PS=scripts/fetch_jenkins.ps1
 
 # Trigger a build with RUN_FULL_MATRIX=true
-powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 trigger worktree-cicd
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS trigger master
+
+# Scan for new branches (discovers new Jenkinsfiles)
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan
+
+# Poll a running build every 15s, print full log when done
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll master 15
+
+# Poll a specific build number (not lastBuild)
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll master 15 2
+
+# One-shot status check
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS status master
+
+# Fetch console log for a specific or latest build
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS lastBuild master
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS 3 master
 ```
 
-The second argument is the branch name (defaults to `worktree-cicd`). Use `poll` in the background whenever waiting for a build to finish.
+Arguments: `<action> [branch=master] [interval] [buildNum]`.
+
+### Jenkins API notes
+
+Jenkins 2.x CSRF protection requires a crumb header on all POST requests. The crumb
+is tied to the web session cookie, so you **must reuse the same session** for the crumb
+request and the subsequent POST. `fetch_jenkins.ps1` handles this automatically.
+
+**Correct endpoints** (learned the hard way):
+
+| Action | Endpoint | Notes |
+|--------|----------|-------|
+| Trigger branch build | `POST /job/modumb/job/{branch}/buildWithParameters` | Works with crumb + session. Returns 201. `/build` returns 400 for parameterized jobs. |
+| Scan for branches | `POST /job/modumb/indexing/build` | May close the connection after triggering — this is normal, the scan still runs. **Do NOT use `/job/modumb/build`** — returns 403. |
+| Build status | `GET /job/modumb/job/{branch}/{num}/api/json` | Returns JSON with `building`, `result`, `number` fields. |
+| Console log | `GET /job/modumb/job/{branch}/{num}/consoleText` | Plain text console output. |
+| Crumb | `GET /crumbIssuer/api/json` | Returns `crumbRequestField` and `crumb`. Must be used within the same HTTP session. |
+
+**Common gotchas**:
+- `poll` with `lastBuild` may return a different build than the one you just triggered (e.g., an auto-scan build). Pass a specific build number to avoid this.
+- After triggering a scan, the auto-discovered branches may immediately start building, creating extra builds.
+- Auth uses API token (not password): `john:<api-token>` base64-encoded in `Authorization: Basic` header.
 
 ### Key Jenkins config
 
