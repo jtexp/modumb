@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/mnt/c/Users/John/modumb/.venv/Scripts/python.exe:*)",
+      "Bash(git:*)",
+      "Bash(head:*)",
+      "Bash(bd list:*)",
+      "Bash(bd create:*)",
+      "Bash(bd update:*)",
+      "Bash(bd close:*)",
+      "Bash(bd ready:*)",
+      "Bash(PY=\"/mnt/c/Users/John/modumb/.venv/Scripts/python.exe\" && $PY -m pytest tests/ -v 2>&1)",
+      "Bash($PY:*)",
+      "Bash(bd sync:*)",
+      "Bash(bd show:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}

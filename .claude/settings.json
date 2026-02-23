@@ -1,0 +1,75 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:docs.python.org)",
+
+      "Bash(pip install *)",
+      "Bash(pip uninstall *)",
+      "Bash(pip list*)",
+      "Bash(pip show *)",
+      "Bash(python3 *)",
+      "Bash(python -m pytest *)",
+      "Bash(python -m pip *)",
+      "Bash(pytest *)",
+      "Bash(.venv/Scripts/python.exe *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(/mnt/c/Users/John/modumb/.venv/Scripts/python.exe *)",
+
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log *)",
+      "Bash(git log)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch*)",
+      "Bash(git checkout *)",
+      "Bash(git tag *)",
+      "Bash(git stash*)",
+      "Bash(git rev-parse *)",
+      "Bash(git show *)",
+
+      "Bash(ls *)",
+      "Bash(ls)",
+      "Bash(pwd)",
+      "Bash(mkdir *)",
+      "Bash(rm *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(tail *)",
+      "Bash(head *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(which *)",
+
+      "Bash(source *)",
+      "Bash(export *)",
+      "Bash(unset *)",
+      "Bash(pactl *)",
+      "Bash(timeout *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(rm -rf /)",
+      "Bash(git push --force *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff --name-only HEAD~1 2>/dev/null | grep -qE '^src/modumb/(modem|datalink|transport|http|proxy)/' && echo 'REMINDER: Run VAC e2e smoke tests before pushing (see CLAUDE.md Session Close Protocol)' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
