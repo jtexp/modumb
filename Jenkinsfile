@@ -29,10 +29,10 @@ pipeline {
                         'small-300-full':   'small --baud-rate 300',
                         'small-1200-full':  'small --baud-rate 1200',
                         'medium-1200-full': 'medium --baud-rate 1200',
-                        'https-1200-full':  'https --baud-rate 1200',
+                        'https-300-full':   'https --baud-rate 300',
                     ]
                     def presets = [
-                        'smoke': ['small-1200-half', 'small-1200-full', 'https-1200-full'],
+                        'smoke': ['small-1200-half', 'small-1200-full', 'https-300-full'],
                         'full':  registry.keySet().toList(),
                     ]
 
