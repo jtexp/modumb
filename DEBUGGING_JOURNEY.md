@@ -154,6 +154,75 @@ pactl load-module module-loopback source=virtual_speaker.monitor
 
 This creates a virtual speaker whose output loops back to the microphone input.
 
+## 10. Full-Duplex Audio I/O and VAC Zero-Block Gaps
+
+### Problem
+When running in full-duplex mode over Virtual Audio Cable, the PortAudio input callback occasionally delivered blocks of pure zeros during concurrent TX, creating gaps in the captured audio that corrupted demodulation.
+
+### Solution
+Replaced zero-block dropping with noise injection in `audio_io.py`:
+- Detect zero-amplitude blocks in the input callback
+- Replace them with low-level noise instead of dropping them, preserving timing continuity
+- Use high-latency `InputStream` settings to reduce dropout frequency
+
+## 11. DFT Demodulator Offset Alignment Bug (HTTPS seq=8 Failure)
+
+### Problem
+HTTPS E2E tests over VAC consistently failed at frame seq=8. The demodulator saw mark (1200 Hz) everywhere instead of distinguishing mark from space, causing CRC failures. HTTP tests passed because they completed within ~7 frames before the issue manifested.
+
+### Diagnosis Journey
+
+**Phase 1: Rule out raw modem degradation.** Created `diag_vac_degradation.py` with 5 test phases (cable-isolated, alternating, concurrent, stream-reset). Sent 100 fixed DATA frames across all phases. Result: 100/100 PASS with score=22, mark_ratio=0.39, confidence=100%. The VAC cables, concurrent I/O, GIL contention, and stream state accumulation were NOT the cause.
+
+**Phase 2: Identify the trigger.** Created `diag_vac_degradation2.py` with 7 protocol-level tests. T1 (timing sweep) and T2 (ARQ simulation) passed. T3 (payload patterns) found the smoking gun: frames with `all_zero` payload (0x00 x 64) failed 8/9 times, while `fixed` payload passed 10/10. The all-zero payload contains 512 consecutive space-frequency bits.
+
+**Phase 3: Root cause analysis.** Ran targeted analysis on saved WAV files from T3 failures:
+
+```
+Best envelope offset: 2164 (score=6)
+DFT at envelope offset 2164: score=0 (preamble decoded as 0x55, bit-inverted!)
+DFT at offset 2124: score=22, frame decodes perfectly
+Delta: -40 samples = exactly 1 bit period at 1200 baud
+```
+
+**Two failure modes identified:**
+
+1. **DFT offset mismatch**: The `demodulate()` method found `best_offset` by scoring with the envelope detector (IIR bandpass filters). Envelope detection has group delay from the IIR filters, so its optimal bit alignment is shifted by ~1 bit period relative to DFT's optimal alignment. All three demodulation strategies (envelope, DFT+clock recovery, DFT simple) shared this same envelope-optimized offset. When DFT used it, preamble bytes 0xAA decoded as 0x55 (every bit inverted).
+
+2. **IIR filter settling**: After 512 consecutive space-frequency bits (the all-zero payload), the mark bandpass filter state decayed to near-zero. When mark bits appeared in the CRC at frame end, the filter couldn't respond fast enough, causing 1-2 bit errors in the last payload byte and CRC.
+
+### Fix (commit 8e56722)
+Two changes in `afsk.py`:
+
+1. **DFT-specific offset search**: After finding the envelope's `best_offset`, scan +/-1.5 bit periods around it using `_demodulate_dft()` + `_score_alignment()` to find the DFT-optimal offset independently:
+```python
+dft_search_start = max(0, best_offset - spb * 3 // 2)
+dft_search_end = min(len(samples) - spb * 8, best_offset + spb * 3 // 2)
+for off in range(dft_search_start, dft_search_end, dft_step):
+    d = self._demodulate_dft(samples, off)
+    s = self._score_alignment(d)
+    if s > dft_best_score:
+        dft_best_score = s
+        dft_offset = off
+```
+
+2. **Candidate reordering**: DFT strategies listed before envelope in the candidate list. Since Python's `sort()` is stable, DFT wins ties. DFT bit decisions are stateless (no filter memory), so they're immune to IIR settling drift that can corrupt envelope results after long same-frequency runs.
+
+### Verification
+- All 8 saved all-zero WAV files that previously failed now decode correctly
+- Added frame-level roundtrip unit tests: all_zero, all_one, alternating, and sequential payloads at both 300 and 1200 baud (8 new tests, all pass)
+- HTTPS E2E test now passes through seq=9 (previously failed at seq=8)
+
+## 12. HTTPS TX/RX Collision at seq=10
+
+### Problem
+After fixing the DFT offset bug, HTTPS E2E tests advance past seq=8 but now fail at seq=10. Both proxy and relay attempt to transmit simultaneously on separate VAC cables. The relay's noise probe captures the proxy's TX signal (`noise_rms=0.3537`), and the subsequent receive gets garbled data with CRC=0x0000.
+
+This occurs in both half-duplex and full-duplex modes. The CONNECT tunnel protocol has bidirectional data flow (client->server TLS data and server->client TLS data), and the stop-and-wait ARQ on each side can trigger TX at overlapping times.
+
+### Status
+Open issue (modumb-40t). The demodulation layer is working correctly — the failure is in protocol-level TX/RX timing coordination.
+
 ## Key Lessons Learned
 
 1. **Half-duplex timing is critical** - Echo suppression, guard times, and turnaround delays must be carefully balanced.
@@ -167,6 +236,14 @@ This creates a virtual speaker whose output loops back to the microphone input.
 5. **Debug output is essential** - Hex dumps of received data and CRC values made systematic errors visible.
 
 6. **Protocol simplification helps** - Disabling advanced features (sideband) made debugging easier.
+
+7. **IIR filters have hidden state coupling** - Envelope detection IIR filters introduce group delay that shifts optimal bit alignment. Sharing one alignment offset across fundamentally different strategies (stateful IIR vs stateless DFT) creates payload-dependent failures that only manifest with extreme bit patterns.
+
+8. **Systematic elimination beats guessing** - The 5-phase raw modem diagnostic ruled out an entire category of causes (cable, driver, GIL, stream state) in one 100-frame run. The 7-test protocol diagnostic then pinpointed the exact trigger (all-zero payload). Investing in diagnostic tooling pays for itself.
+
+9. **Unit tests need adversarial payloads** - Standard test data (ASCII text, mixed bytes) exercises the "easy middle" of the demodulator. Edge cases like all-zero (512 consecutive space bits) or all-one (512 consecutive mark bits) stress filter settling and adaptive thresholds in ways normal data never does.
+
+10. **Bidirectional protocols need TX/RX coordination** - Stop-and-wait ARQ works well for request/response patterns but breaks down when both sides have independent data to send (CONNECT tunneling). Each side's ARQ loop can trigger TX at overlapping times, causing collisions even on separate physical cables.
 
 ## Final Configuration Summary
 
