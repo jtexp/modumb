@@ -192,6 +192,32 @@ $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
 
 All must pass before committing. If only docs/tests/config changed, skip e2e.
 
+## E2E Development Cycle
+
+When iterating on modem/datalink/transport/HTTP/proxy code via Jenkins, follow this
+three-phase cycle to balance fast iteration with regression safety:
+
+```
+Phase 1: FULL RUN — identify failures
+  powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run smoke
+  # or: trigger (runs full matrix)
+  # Observe which tests pass/fail
+
+Phase 2: TARGETED — iterate on failures
+  # Re-run only the failing test(s) until they pass
+  powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run https-1200-half
+  powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS poll master 15 <N>
+  # Commit fix, re-run same test, repeat until green
+
+Phase 3: FULL RUN — verify no regressions
+  powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run smoke
+  # All smoke tests must pass before considering the fix complete
+```
+
+This avoids wasting time running passing tests during the fix loop (Phase 2) while
+still catching regressions at the end (Phase 3). Use `run <id>` for Phase 2 — it's
+significantly faster than `run smoke` or `trigger`.
+
 ## Issue Tracking
 
 We use `bd` (beads) for lightweight issue tracking with dependency support.
