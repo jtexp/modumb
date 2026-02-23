@@ -8,6 +8,7 @@ Implements reliable delivery over the unreliable frame layer using:
 
 import threading
 import time
+import queue
 from typing import Optional, Callable
 from dataclasses import dataclass
 
@@ -78,6 +79,7 @@ class ReliableTransport:
 
         # Threading
         self._lock = threading.Lock()
+        self._pending_rx: "queue.Queue[bytes]" = queue.Queue()
 
     def _next_seq(self) -> int:
         """Get next transmit sequence number."""
@@ -135,27 +137,38 @@ class ReliableTransport:
             if attempt > 0:
                 self.stats.retransmissions += 1
 
-            # Wait for ACK/NAK
-            response = self.framer.wait_for_frame(timeout=self.timeout)
+            deadline = time.time() + self.timeout
+            retry_now = False
+            while time.time() < deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
 
-            if response is None:
+                response = self.framer.receive_frame(timeout=remaining)
+                if response is None:
+                    continue
+
+                if response.frame_type == FrameType.ACK:
+                    if response.sequence == seq:
+                        self.stats.ack_received += 1
+                        return True
+                    continue
+
+                if response.frame_type == FrameType.NAK:
+                    self.stats.nak_received += 1
+                    retry_now = True
+                    break
+
+                if response.frame_type == FrameType.RST:
+                    return False
+
+                if response.frame_type == FrameType.DATA:
+                    payload = self._handle_data_frame(response)
+                    if payload is not None:
+                        self._pending_rx.put(payload)
+
+            if not retry_now:
                 self.stats.timeouts += 1
-                continue
-
-            if response.frame_type == FrameType.ACK:
-                if response.sequence == seq:
-                    self.stats.ack_received += 1
-                    return True
-                # Wrong sequence, ignore
-
-            elif response.frame_type == FrameType.NAK:
-                self.stats.nak_received += 1
-                # Retransmit immediately
-                continue
-
-            elif response.frame_type == FrameType.RST:
-                # Connection reset
-                return False
 
         return False
 
@@ -173,8 +186,12 @@ class ReliableTransport:
         if timeout is None:
             timeout = self.timeout * 2
 
+        try:
+            return self._pending_rx.get_nowait()
+        except queue.Empty:
+            pass
+
         deadline = time.time() + timeout
-        received_data = bytearray()
 
         while time.time() < deadline:
             remaining = deadline - time.time()
@@ -189,34 +206,9 @@ class ReliableTransport:
             self.stats.frames_received += 1
 
             if frame.frame_type == FrameType.DATA:
-                # Check sequence number
-                if frame.sequence == self._rx_seq:
-                    # Expected frame, accept it
-                    received_data.extend(frame.payload)
-                    self._rx_seq = (self._rx_seq + 1) & 0xFFFF
-
-                    # Half-duplex: delay before ACK to widen the gap
-                    # between the sender's last TX and its next TX.
-                    # Without this, tunnel exchanges race: the sender
-                    # fires its next DATA before the receiver has
-                    # re-entered modem.receive() (noise measurement
-                    # window), causing demodulation failures at ~seq 8.
-                    if not self.full_duplex:
-                        time.sleep(TURNAROUND_GUARD)
-
-                    # Send ACK
-                    self.framer.send_ack(frame.sequence)
-
-                    # Return data for this frame
-                    return bytes(frame.payload)
-
-                elif frame.sequence < self._rx_seq:
-                    # Duplicate frame, re-ACK
-                    self.framer.send_ack(frame.sequence)
-
-                else:
-                    # Out of order, NAK
-                    self.framer.send_nak(self._rx_seq)
+                payload = self._handle_data_frame(frame)
+                if payload is not None:
+                    return payload
 
             elif frame.frame_type == FrameType.FIN:
                 # Connection closing
@@ -227,6 +219,25 @@ class ReliableTransport:
                 # Connection reset
                 return None
 
+        return None
+
+    def _handle_data_frame(self, frame: Frame) -> Optional[bytes]:
+        """Process an incoming DATA frame and send ACK/NAK as needed."""
+        if frame.sequence == self._rx_seq:
+            payload = bytes(frame.payload)
+            self._rx_seq = (self._rx_seq + 1) & 0xFFFF
+
+            if not self.full_duplex:
+                time.sleep(TURNAROUND_GUARD)
+
+            self.framer.send_ack(frame.sequence)
+            return payload
+
+        if frame.sequence < self._rx_seq:
+            self.framer.send_ack(frame.sequence)
+            return None
+
+        self.framer.send_nak(self._rx_seq)
         return None
 
     def receive_all(self, timeout: float = None) -> bytes:
@@ -262,6 +273,7 @@ class ReliableTransport:
             self._tx_seq = 0
             self._rx_seq = 0
             self.stats = TransportStats()
+            self._pending_rx = queue.Queue()
 
     def close(self) -> None:
         """Close the transport (send FIN)."""
