@@ -296,6 +296,8 @@ class HttpServer:
             if (request and request.method == 'CONNECT'
                     and response.status_code == 200
                     and self.connect_handler):
+                import time
+                time.sleep(0.5)  # Let proxy process 200 + ACK before tunnel starts
                 try:
                     self.connect_handler(session, request.path)
                 except Exception as e:

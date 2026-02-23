@@ -196,6 +196,12 @@ class Modem:
             if len(samples) == 0:
                 return b''
 
+            import sys
+            duration_ms = len(samples) / self.sample_rate * 1000
+            print(f'MODEM RX: noise_rms={noise_rms:.4f} threshold={silence_threshold:.4f} '
+                  f'captured={len(samples)} samples ({duration_ms:.0f}ms)',
+                  file=sys.stderr, flush=True)
+
             # Trim leading silence before demodulation.
             # receive_until_silence() collects all audio blocks including
             # pre-signal silence, which dilutes the demodulator's RMS
@@ -204,6 +210,9 @@ class Modem:
 
             # Demodulate to bytes
             data = self.demodulator.demodulate(samples)
+
+            print(f'MODEM RX: demodulated={len(data)} bytes',
+                  file=sys.stderr, flush=True)
 
             return data
 

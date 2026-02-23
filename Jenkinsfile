@@ -52,10 +52,8 @@ pipeline {
                 lock('vac-audio-devices') {
                     bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
                     bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200'
-                    // HTTPS tests disabled — known modem-layer demodulation failure at frame seq=8
-                    // See: CLAUDE.md "Known issue" and beads issue for HTTPS tunnel
-                    // bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
-                    // bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
+                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
                 }
             }
         }

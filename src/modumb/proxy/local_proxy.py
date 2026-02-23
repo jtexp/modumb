@@ -183,6 +183,9 @@ class LocalProxy:
                     self.end_headers()
                     self.wfile.flush()
 
+                    import time
+                    time.sleep(0.5)  # Let relay enter connect_handler before tunnel data
+
                     # Switch browser socket to non-blocking for select
                     browser_sock = self.connection
                     browser_sock.setblocking(False)
