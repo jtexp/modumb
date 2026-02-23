@@ -11,6 +11,7 @@ from modumb.modem.afsk import (
     MARK_FREQ,
     SPACE_FREQ,
 )
+from modumb.datalink.frame import Frame
 
 
 class TestAFSKModulator:
@@ -125,3 +126,40 @@ class TestAFSKRoundtrip:
 
         # At minimum should get something back
         assert len(recovered) > 0
+
+
+class TestFrameRoundtrip:
+    """Test full frame encode -> modulate -> demodulate -> decode roundtrips.
+
+    These catch demodulator alignment and IIR filter settling issues that
+    byte-level roundtrip tests miss, because the frame CRC validates every
+    single bit in the payload.
+    """
+
+    @pytest.mark.parametrize("baud_rate", [300, 1200])
+    @pytest.mark.parametrize("payload", [
+        pytest.param(bytes(64), id="all_zero"),
+        pytest.param(bytes([0xFF] * 64), id="all_one"),
+        pytest.param(bytes([0xAA] * 64), id="alternating"),
+        pytest.param(bytes(range(64)), id="sequential"),
+    ])
+    def test_frame_roundtrip(self, baud_rate, payload):
+        """Modulate a framed packet and verify CRC-correct decode."""
+        sample_rate = 48000
+        mod = AFSKModulator(sample_rate=sample_rate, baud_rate=baud_rate)
+        demod = AFSKDemodulator(sample_rate=sample_rate, baud_rate=baud_rate)
+
+        frame = Frame.create_data(sequence=1, data=payload)
+        encoded = frame.encode()
+        samples = mod.modulate(encoded)
+
+        # Pad with silence (mimics lead/trail silence in real TX path)
+        spb = sample_rate // baud_rate
+        padding = np.zeros(spb * 16, dtype=np.float32)
+        samples = np.concatenate([padding, samples, padding])
+
+        data = demod.demodulate(samples)
+        decoded = Frame.decode(data)
+
+        assert decoded is not None, "Frame CRC check failed after demodulation"
+        assert decoded.payload == payload

@@ -600,14 +600,41 @@ class AFSKDemodulator:
         #    zero clock drift, where clock recovery can introduce errors)
         env_result = self._demodulate_envelope_recovered(
             mark_env, space_env, best_offset)
-        dft_result = self._demodulate_dft_recovered(
-            samples, mark_env, space_env, best_offset)
-        dft_simple = self._demodulate_dft(samples, best_offset)
 
+        # DFT strategies need their own offset: envelope IIR filters have
+        # group delay that shifts the optimal alignment by up to 1 bit
+        # period.  For payloads with long same-frequency runs (e.g. 0x00)
+        # this mismatch inverts preamble bits (0xAA -> 0x55).
+        dft_offset = best_offset
+        dft_best_score = -1
+        spb = self.samples_per_bit
+        dft_search_start = max(0, best_offset - spb * 3 // 2)
+        dft_search_end = min(
+            len(samples) - spb * 8,
+            best_offset + spb * 3 // 2,
+        )
+        dft_step = max(1, spb // 8)
+        for off in range(dft_search_start, dft_search_end, dft_step):
+            d = self._demodulate_dft(samples, off)
+            s = self._score_alignment(d)
+            if s > dft_best_score:
+                dft_best_score = s
+                dft_offset = off
+                if s >= 18:
+                    break
+
+        dft_result = self._demodulate_dft_recovered(
+            samples, mark_env, space_env, dft_offset)
+        dft_simple = self._demodulate_dft(samples, dft_offset)
+
+        # DFT strategies are listed first so that stable sort prefers them
+        # when scores tie.  DFT bit decisions are stateless (no filter
+        # memory), so they're immune to IIR settling drift that can corrupt
+        # envelope results after long same-frequency payload runs.
         candidates = [
-            (env_result, self._score_alignment(env_result)),
-            (dft_result, self._score_alignment(dft_result)),
             (dft_simple, self._score_alignment(dft_simple)),
+            (dft_result, self._score_alignment(dft_result)),
+            (env_result, self._score_alignment(env_result)),
         ]
         candidates.sort(key=lambda x: x[1], reverse=True)
 
