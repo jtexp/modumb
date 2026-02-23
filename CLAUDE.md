@@ -139,6 +139,10 @@ $PY "C:/Users/John/modumb/scripts/diag_vac_frame.py"
 # VAC degradation diagnostic (5-phase, isolates demod degradation root cause)
 $PY "C:/Users/John/modumb/scripts/diag_vac_degradation.py" --phases 1,2 --frames 10   # quick
 $PY "C:/Users/John/modumb/scripts/diag_vac_degradation.py" --frames 20                 # full
+
+# Protocol-level VAC diagnostic (7 tests: timing, ARQ, payload patterns, etc.)
+$PY "C:/Users/John/modumb/scripts/diag_vac_degradation2.py" --tests 1,2,3 --frames 10 # quick
+$PY "C:/Users/John/modumb/scripts/diag_vac_degradation2.py" --frames 20               # full
 ```
 
 ### VAC e2e test matrix
@@ -161,15 +165,18 @@ Cable/VAC tests default to full-duplex. Use `--duplex half` to test half-duplex.
 | 8 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200 --duplex half` | TLS handshake + response |
 | 9 | `$PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200` | Faster than #8 (full-duplex) |
 
-**Known issue**: HTTPS tests (8, 9) fail at frame seq=8 due to AFSK demodulation
-degradation on VAC Cable 2 after ~8 tunnel exchanges. The tunnel protocol itself
-works correctly; the failure is in the modem layer. HTTP tests (1-7) are unaffected.
-`diag_vac_degradation.py` (5-phase diagnostic, 2025-02-22) confirmed the degradation
-is **not** reproducible with fixed DATA frames at the modem layer — all 100 frames
-across all 5 phases (cable-isolated, alternating, concurrent, stream-reset) passed
-with score=22, mark_ratio≈0.39, confidence=100%. The root cause is
-protocol-timing-dependent (ARQ retransmit loop, TLS payload byte patterns, or
-tighter inter-frame gaps in the real HTTPS flow), not raw modem degradation.
+**Known issue**: HTTPS tests (8, 9) fail at frame seq=10 due to a TX/RX collision
+where both proxy and relay transmit simultaneously on separate VAC cables. The relay
+receives the frame preamble/sync correctly but CRC bytes are corrupted (0x0000).
+This occurs in both half-duplex and full-duplex modes. HTTP tests (1-7) are unaffected.
+Tracked in modumb-40t.
+
+**Fixed (2026-02-23)**: The previous seq=8 AFSK demodulation failure was caused by
+the DFT demodulator sharing the envelope strategy's bit alignment offset. IIR filter
+group delay shifted the optimal DFT offset by exactly 1 bit period, inverting preamble
+bits (0xAA->0x55) for payloads with long same-frequency runs (e.g. all-zero TLS data).
+Fix: DFT strategies now search for their own optimal offset independently, and DFT is
+preferred over envelope on score ties (stateless per-bit, immune to IIR settling drift).
 
 All HTTP tests must pass with zero retransmissions. If short on time, tests 2, 6 are the
 minimum (HTTP half-duplex + full-duplex at 1200 baud).
@@ -195,7 +202,7 @@ $PY -m pytest tests/ -v
 # 2. VAC e2e smoke tests (run sequentially, never in parallel)
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200 --duplex half
 $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" small --baud-rate 1200
-# HTTPS tests are known-failing (modem-layer demodulation issue at frame seq=8)
+# HTTPS tests are known-failing (TX/RX collision at frame seq=10, see modumb-40t)
 # $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200 --duplex half
 # $PY "C:/Users/John/modumb/scripts/test_e2e_vac.py" https --baud-rate 1200
 ```

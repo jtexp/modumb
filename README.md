@@ -115,6 +115,13 @@ Browser sends `GET http://example.com/path` to the local proxy on `localhost:808
 Preamble (16 x 0xAA) | Sync (0x7E 0x7E) | Type (1B) | Seq (2B) | Len (2B) | Payload (0-64B) | CRC-16 (2B)
 ```
 
+### Duplex Modes
+
+- **Half-duplex** (default for acoustic): one direction at a time, turnaround delay between TX/RX
+- **Full-duplex** (default for cable/loopback): simultaneous send/receive on separate cables, faster throughput
+
+Set via `--duplex half` or `--duplex full`, or `MODEM_DUPLEX` environment variable.
+
 ### Performance
 
 Measured over Virtual Audio Cable (Muzychenko) on a single Windows machine:
@@ -124,7 +131,7 @@ Measured over Virtual Audio Cable (Muzychenko) on a single Windows machine:
 | example.com (528 B) | 72.5s / 7.3 B/s | 30.2s / 17.5 B/s | 2.4x |
 | info.cern.ch (646 B) | 78.3s / 8.2 B/s | 32.9s / 19.7 B/s | 2.4x |
 
-Max payload per frame is 64 bytes. Throughput is limited by half-duplex stop-and-wait ARQ: each DATA frame requires an ACK before the next is sent. Use `--baud-rate 1200` on both sides for faster transfers over cable or virtual cable.
+Max payload per frame is 64 bytes. Throughput is limited by stop-and-wait ARQ: each DATA frame requires an ACK before the next is sent. Use `--baud-rate 1200` on both sides for faster transfers over cable or virtual cable.
 
 ## CLI Commands
 
@@ -160,7 +167,7 @@ Max payload per frame is 64 bytes. Throughput is limited by half-duplex stop-and
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests (52 unit tests)
+# Run tests
 pytest tests/ -v
 
 # Run tests with coverage
@@ -174,10 +181,9 @@ python scripts/test_e2e_vac.py medium
 
 ## Limitations
 
-- **HTTP only** -- HTTPS CONNECT tunneling not yet implemented
 - **Slow** -- 300/1200 baud with stop-and-wait ARQ, best for small pages and API responses
-- **Half-duplex** -- one direction at a time (no simultaneous send/receive)
 - **Max response** -- 1MB default (configurable via `--max-response-size`)
+- **HTTPS** -- CONNECT tunneling is implemented but has a known issue with TLS handshakes failing on long sessions over Virtual Audio Cable (works over real audio cables)
 
 ## License
 
