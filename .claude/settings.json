@@ -51,7 +51,8 @@
       "Bash(export *)",
       "Bash(unset *)",
       "Bash(pactl *)",
-      "Bash(timeout *)"
+      "Bash(timeout *)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/scripts/fetch_jenkins.ps1 *)"
     ],
     "deny": [
       "Bash(sudo *)",
