@@ -52,15 +52,48 @@ function Get-QueueBuildNumber($queueUrl) {
     return $null
 }
 
-if ($action -eq "trigger") {
-    # Parameterized build — must use buildWithParameters endpoint.
+if ($action -eq "run") {
+    # Run specific E2E tests by ID or preset.
+    # Usage: run <tests> [branch]
+    #   <tests>: comma-separated IDs or preset (smoke, full, none)
+    $tests = $args[1]
+    if (-not $tests) {
+        Write-Host "Usage: run <tests> [branch]"
+        Write-Host "  <tests>: comma-separated test IDs or preset"
+        Write-Host "  Presets: smoke, full, none"
+        Write-Host "  IDs: small-300-half, small-1200-half, medium-300-half, medium-1200-half,"
+        Write-Host "       small-300-full, small-1200-full, medium-1200-full,"
+        Write-Host "       https-1200-half, https-1200-full"
+        exit 1
+    }
+    $runBranch = if ($args[2]) { $args[2] } else { "master" }
+    $runUrl = "http://localhost:8090/job/modumb/job/$runBranch"
+    $ctx = Get-CrumbHeaders
+    $resp = Invoke-WebRequest -Uri "$runUrl/buildWithParameters" -Method POST `
+        -Headers $ctx.Headers -WebSession $ctx.Session `
+        -Body "json={`"parameter`":[{`"name`":`"E2E_TESTS`",`"value`":`"$tests`"}]}" `
+        -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
+    Write-Host "Triggered build on $runBranch with E2E_TESTS=$tests (HTTP $($resp.StatusCode))"
+
+    $queueUrl = $resp.Headers["Location"]
+    if ($queueUrl) {
+        $queueUrl = ($queueUrl -replace '/$','')
+        Write-Host "Queue: $queueUrl"
+        $buildNum = Get-QueueBuildNumber $queueUrl
+        if ($buildNum) {
+            Write-Host "Build: #$buildNum"
+        }
+    }
+
+} elseif ($action -eq "trigger") {
+    # Parameterized build — sends E2E_TESTS=full for backward compat.
     # /build returns 400 for parameterized jobs.
     $ctx = Get-CrumbHeaders
     $resp = Invoke-WebRequest -Uri "$baseUrl/buildWithParameters" -Method POST `
         -Headers $ctx.Headers -WebSession $ctx.Session `
-        -Body "json={`"parameter`":[{`"name`":`"RUN_FULL_MATRIX`",`"value`":true}]}" `
+        -Body "json={`"parameter`":[{`"name`":`"E2E_TESTS`",`"value`":`"full`"}]}" `
         -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
-    Write-Host "Triggered build on $branch (HTTP $($resp.StatusCode))"
+    Write-Host "Triggered build on $branch with E2E_TESTS=full (HTTP $($resp.StatusCode))"
 
     # Resolve queue item to build number so callers know exactly which build to poll.
     # Jenkins returns a Location header pointing to the queue item (e.g. .../queue/item/42/).

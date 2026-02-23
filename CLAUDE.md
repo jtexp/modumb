@@ -234,7 +234,13 @@ powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan maste
 # Scan without commit check (just trigger scan, wait for any new build)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS scan
 
-# Force-trigger a build with RUN_FULL_MATRIX=true (explicit only)
+# Run specific E2E tests by ID or preset
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run small-1200-half
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run small-1200-half,medium-300-half
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run smoke
+powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS run small-1200-half feat-2
+
+# Force-trigger full E2E matrix (explicit only)
 powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS trigger master
 
 # Poll a running build every 15s, print full log when done
@@ -253,10 +259,16 @@ powershell.exe -ExecutionPolicy Bypass -File C:/Users/John/modumb/$PS 3 master
 
 **Actions**:
 - `scan [branch] [timeout] [commit]` — Rescan repo. If `commit` given, checks whether it's already built (exits early if so). Otherwise waits up to `timeout` seconds for a new build. Reports build number for use with `poll`. **This is the default way to kick off builds.**
-- `trigger [branch]` — Force a parameterized build (`RUN_FULL_MATRIX=true`). Resolves the queue item to a build number. **Only use when explicitly needed.**
+- `run <tests> [branch]` — Run specific E2E tests. `<tests>` is comma-separated IDs (e.g. `small-1200-half,medium-300-half`) or a preset (`smoke`, `full`, `none`). Posts `E2E_TESTS=<tests>` via `buildWithParameters`. Resolves to build number.
+- `trigger [branch]` — Force a parameterized build (`E2E_TESTS=full`). Resolves the queue item to a build number. **Only use when explicitly needed.**
 - `poll [branch] [interval] [buildNum]` — Poll until build finishes, then print full console log. Shows Git commit SHA when available. Pins to a specific build number after first check.
 - `status [branch]` — One-shot status with commit SHA (truncated to 10 chars).
 - `<buildNum> [branch]` / `lastBuild [branch]` — Fetch console text.
+
+**E2E_TESTS parameter** (replaces old `RUN_FULL_MATRIX` boolean):
+- Empty (default): auto-detect from changed files, run smoke tests if source changed
+- Preset: `smoke` (4 tests), `full` (all 9), `none` (skip E2E)
+- Specific IDs: `small-300-half`, `small-1200-half`, `medium-300-half`, `medium-1200-half`, `small-300-full`, `small-1200-full`, `medium-1200-full`, `https-1200-half`, `https-1200-full`
 
 ### Jenkins API notes
 
