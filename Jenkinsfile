@@ -2,8 +2,8 @@ pipeline {
     agent { label 'windows-audio' }
 
     parameters {
-        booleanParam(name: 'RUN_FULL_MATRIX', defaultValue: false,
-                     description: 'Run all 9 E2E test matrix entries instead of just the 4 smoke tests')
+        string(name: 'E2E_TESTS', defaultValue: '',
+               description: 'E2E tests: comma-separated IDs (e.g. small-1200-half,medium-300-half), preset (smoke/full/none), or empty for auto-detect')
     }
 
     environment {
@@ -18,62 +18,84 @@ pipeline {
             }
         }
 
-        stage('Check E2E Needed') {
+        stage('Resolve E2E Tests') {
             steps {
                 script {
-                    def paths
-                    if (env.BRANCH_NAME == 'master') {
-                        // Use HEAD~1 for regular commits, but for merges check all
-                        // files in the merge by diffing against the first parent
-                        def isMerge = bat(script: 'git rev-parse --verify HEAD^2', returnStatus: true) == 0
-                        if (isMerge) {
-                            paths = bat(script: 'git diff --name-only HEAD^1...HEAD', returnStdout: true).trim()
-                        } else {
-                            paths = bat(script: 'git diff --name-only HEAD~1...HEAD', returnStdout: true).trim()
+                    def registry = [
+                        'small-300-half':   'small --baud-rate 300 --duplex half',
+                        'small-1200-half':  'small --baud-rate 1200 --duplex half',
+                        'medium-300-half':  'medium --baud-rate 300 --duplex half',
+                        'medium-1200-half': 'medium --baud-rate 1200 --duplex half',
+                        'small-300-full':   'small --baud-rate 300',
+                        'small-1200-full':  'small --baud-rate 1200',
+                        'medium-1200-full': 'medium --baud-rate 1200',
+                        'https-1200-half':  'https --baud-rate 1200 --duplex half',
+                        'https-1200-full':  'https --baud-rate 1200',
+                    ]
+                    def presets = [
+                        'smoke': ['small-1200-half', 'small-1200-full', 'https-1200-half', 'https-1200-full'],
+                        'full':  registry.keySet().toList(),
+                    ]
+
+                    def param = params.E2E_TESTS?.trim() ?: ''
+                    def testIds = []
+
+                    if (param == 'none') {
+                        testIds = []
+                    } else if (presets.containsKey(param)) {
+                        testIds = presets[param]
+                    } else if (param) {
+                        testIds = param.split(',').collect { it.trim() }
+                        def invalid = testIds.findAll { !registry.containsKey(it) }
+                        if (invalid) {
+                            error "Unknown E2E test IDs: ${invalid.join(', ')}\nValid IDs: ${registry.keySet().sort().join(', ')}"
                         }
                     } else {
-                        paths = bat(script: 'git diff --name-only origin/master...HEAD', returnStdout: true).trim()
+                        // Auto-detect from changed files
+                        def paths
+                        if (env.BRANCH_NAME == 'master') {
+                            def isMerge = bat(script: 'git rev-parse --verify HEAD^2', returnStatus: true) == 0
+                            if (isMerge) {
+                                paths = bat(script: 'git diff --name-only HEAD^1...HEAD', returnStdout: true).trim()
+                            } else {
+                                paths = bat(script: 'git diff --name-only HEAD~1...HEAD', returnStdout: true).trim()
+                            }
+                        } else {
+                            paths = bat(script: 'git diff --name-only origin/master...HEAD', returnStdout: true).trim()
+                        }
+                        def e2eNeeded = paths.split('\n').any { line ->
+                            line.trim().matches('src/modumb/(modem|datalink|transport|http|proxy)/.*')
+                        }
+                        echo "Changed files:\n${paths}"
+                        echo "E2E needed: ${e2eNeeded}"
+                        if (e2eNeeded) {
+                            testIds = presets['smoke']
+                        }
                     }
-                    def e2eNeeded = paths.split('\n').any { line ->
-                        line.trim().matches('src/modumb/(modem|datalink|transport|http|proxy)/.*')
-                    }
-                    env.E2E_NEEDED = e2eNeeded.toString()
-                    echo "Changed files:\n${paths}"
-                    echo "E2E needed: ${env.E2E_NEEDED}"
+
+                    def commands = testIds.collect { registry[it] }
+                    env.E2E_COMMANDS = commands.join('\n')
+                    env.E2E_TEST_IDS = testIds.join(',')
+                    env.E2E_TEST_COUNT = testIds.size().toString()
+                    echo "E2E tests (${env.E2E_TEST_COUNT}): ${env.E2E_TEST_IDS}"
                 }
             }
         }
 
-        stage('E2E Smoke Tests') {
+        stage('E2E Tests') {
             when {
-                expression { env.E2E_NEEDED == 'true' || params.RUN_FULL_MATRIX }
+                expression { env.E2E_TEST_COUNT.toInteger() > 0 }
             }
             steps {
                 lock('vac-audio-devices') {
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
-                }
-            }
-        }
-
-        stage('E2E Full Matrix') {
-            when {
-                expression { params.RUN_FULL_MATRIX }
-            }
-            steps {
-                lock('vac-audio-devices') {
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 300 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 300 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 1200 --duplex half'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 300'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py small --baud-rate 1200'
-                    bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py medium --baud-rate 1200'
-                    // HTTPS tests disabled — known modem-layer demodulation failure
-                    // bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200 --duplex half'
-                    // bat '%MODUMB_PYTHON% scripts/test_e2e_vac.py https --baud-rate 1200'
+                    script {
+                        def ids = env.E2E_TEST_IDS.split(',')
+                        def cmds = env.E2E_COMMANDS.split('\n')
+                        for (int i = 0; i < cmds.size(); i++) {
+                            echo "Running E2E test ${i + 1}/${cmds.size()}: ${ids[i]}"
+                            bat "%MODUMB_PYTHON% scripts/test_e2e_vac.py ${cmds[i]}"
+                        }
+                    }
                 }
             }
         }
